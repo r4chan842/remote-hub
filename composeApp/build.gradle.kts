@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 
 plugins {
@@ -10,7 +11,7 @@ plugins {
 kotlin {
     jvm("desktop") {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            jvmTarget.set(JvmTarget.JVM_17)
         }
     }
 
@@ -49,14 +50,14 @@ compose.desktop {
     }
 }
 
-val desktopTarget = kotlin.targets.getByName("desktop") as KotlinJvmTarget
-val desktopMain = desktopTarget.compilations.getByName("main")
+val jvmCompilation = (kotlin.targets.getByName("desktop") as KotlinJvmTarget)
+    .compilations.getByName("main")
 
 tasks.register<JavaExec>("renderScreens") {
     group = "verification"
     description = "Renders every application screen to PNG from the real Compose Material 3 implementation."
-    dependsOn(desktopMain.compileTaskProvider)
-    classpath = desktopMain.output.allOutputs + desktopMain.runtimeDependencyFiles
+    dependsOn(jvmCompilation.compileTaskProvider)
+    classpath = jvmCompilation.output.allOutputs + jvmCompilation.runtimeDependencyFiles
     mainClass.set("app.remotehub.tools.RenderScreensKt")
     systemProperty("java.awt.headless", "true")
     systemProperty("skiko.renderApi", "SOFTWARE")
