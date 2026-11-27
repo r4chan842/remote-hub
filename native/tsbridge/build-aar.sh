@@ -11,6 +11,10 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 GOMOBILE_VERSION="v0.0.0-20261117202452-47699113848a"
 
+# anet reads Android interfaces through ioctl instead of the netlink dump that
+# Android 11+ denies to app UIDs; netmon_android.go registers it with netmon.
+ANET_VERSION="v0.0.5"
+go get "github.com/wlynxg/anet@${ANET_VERSION}"
 go get "golang.org/x/mobile@${GOMOBILE_VERSION}"
 go get -tool "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
 go get -tool "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_VERSION}"
@@ -53,6 +57,10 @@ else:
     print("patched tsnet android executable fallback")
 PYEOF
 grep -n 'case "ios", "darwin", "android"' "$TSNET_FILE"
+
+# Compile the Android-only sources before the long gomobile step so a mistake in
+# netmon_android.go surfaces in seconds rather than minutes.
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...
 
 mkdir -p out
 gomobile bind \

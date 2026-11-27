@@ -51,16 +51,16 @@ type Status struct {
 	IPv6       string   `json:"ipv6"`
 	AuthURL    string   `json:"authUrl"`
 	Error      string   `json:"error"`
-	Health     []string `json:"health,omitempty"`
+	Health     []string `json:"health"`
 	PeerCount  int      `json:"peerCount"`
 	Online     bool     `json:"online"`
 	Relay      string   `json:"relay"`
 	RxBytes    int64    `json:"rxBytes"`
 	TxBytes    int64    `json:"txBytes"`
-	Logs       []string `json:"logs,omitempty"`
+	Logs       []string `json:"logs"`
 	Version    string   `json:"version"`
 	Userspace  bool     `json:"userspace"`
-	Forwarders []string `json:"forwarders,omitempty"`
+	Forwarders []string `json:"forwarders"`
 }
 
 type Peer struct {
@@ -74,7 +74,7 @@ type Peer struct {
 	RxBytes  int64    `json:"rxBytes"`
 	TxBytes  int64    `json:"txBytes"`
 	LastSeen string   `json:"lastSeen"`
-	Tags     []string `json:"tags,omitempty"`
+	Tags     []string `json:"tags"`
 }
 
 func NewNode(stateDir, hostname, authKey string, ephemeral bool) *Node {
@@ -169,7 +169,15 @@ func (n *Node) StartAsync() {
 }
 
 func (n *Node) StatusJSON() string {
-	st := Status{State: "Stopped", Hostname: n.hostname, Userspace: true}
+	// Never emit JSON null for a list: the Kotlin decoder expects an array.
+	st := Status{
+		State:      "Stopped",
+		Hostname:   n.hostname,
+		Userspace:  true,
+		Health:     []string{},
+		Logs:       []string{},
+		Forwarders: []string{},
+	}
 	n.mu.Lock()
 	srv, lc := n.srv, n.lc
 	st.Error = n.lastErr
@@ -194,7 +202,9 @@ func (n *Node) StatusJSON() string {
 	st.Running = s.BackendState == "Running"
 	st.Version = s.Version
 	st.Userspace = !s.TUN
-	st.Health = s.Health
+	if len(s.Health) > 0 {
+		st.Health = append([]string{}, s.Health...)
+	}
 	st.PeerCount = len(s.Peer)
 	if s.CurrentTailnet != nil {
 		st.Tailnet = s.CurrentTailnet.Name
@@ -235,6 +245,7 @@ func (n *Node) PeersJSON() string {
 	out := make([]Peer, 0, len(s.Peer))
 	for _, p := range s.Peer {
 		item := Peer{
+			Tags:     []string{},
 			Hostname: p.HostName,
 			DNSName:  strings.TrimSuffix(p.DNSName, "."),
 			Online:   p.Online,
