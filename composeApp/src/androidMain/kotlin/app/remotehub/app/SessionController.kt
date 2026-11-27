@@ -984,7 +984,37 @@ class SessionController(
         return if (w > 0 && h > 0) w.toFloat() / h.toFloat() else 16f / 9f
     }
 
-    fun connectRemote(serverId: String) {
+    /**
+     * The engine reported a disconnect after the desktop was already live. This used
+     * to be ignored entirely, so `connected` went false, the UI read that as "still
+     * handshaking", and the last frame sat under a permanent connecting spinner.
+     * Reconnect once; if that also fails, surface the real reason.
+     */
+    private fun handleRemoteDrop(serverId: String, reason: String) {
+        rdpSessions.remove(serverId)?.close()
+        metricsCache.remove(serverId)
+        updateServer(serverId) {
+            if (it.state == ServerState.Connected) it.copy(state = ServerState.Ready) else it
+        }
+        stopSessionService()
+        Diagnostics.warn("rdp", "session dropped: $reason")
+        if (state.screen != AppScreen.Remote || state.activeServerId != serverId) {
+            publish(state.copy(remoteConnecting = false))
+            return
+        }
+        publish(state.copy(remoteConnecting = true))
+        scope.launch {
+            delay(1200)
+            if (state.screen == AppScreen.Remote && state.activeServerId == serverId) {
+                Diagnostics.info("rdp", "reconnecting after a dropped link")
+                connectRemote(serverId, allowAutoReconnect = false)
+            } else {
+                publish(state.copy(remoteConnecting = false))
+            }
+        }
+    }
+
+    fun connectRemote(serverId: String, allowAutoReconnect: Boolean = true) {
         val session = state.servers.firstOrNull { it.id == serverId } ?: return
         val connection = session.connection
         if (connection == null || connection.address.isBlank()) {
@@ -1041,6 +1071,19 @@ class SessionController(
                     publish(state.copy())
                 }
                 rdp.onError = { message -> fail("rdp", message) }
+                rdp.onDropped = { reason ->
+                    if (allowAutoReconnect) {
+                        handleRemoteDrop(serverId, reason)
+                    } else {
+                        rdpSessions.remove(serverId)?.close()
+                        metricsCache.remove(serverId)
+                        updateServer(serverId) {
+                            if (it.state == ServerState.Connected) it.copy(state = ServerState.Ready) else it
+                        }
+                        publish(state.copy(remoteConnecting = false))
+                        fail("rdp", reason)
+                    }
+                }
                 outcome = runCatching { rdp.connect(graphicsPipeline = useGraphics) }
                 if (outcome.isSuccess) break
                 val problem = outcome.exceptionOrNull()
@@ -1080,6 +1123,9 @@ class SessionController(
     }
 
     fun disconnectRemote(serverId: String) {
+        // A gesture interrupted by navigation could otherwise leave a modifier or a
+        // mouse button held down on the host for the next session.
+        rdpSessions[serverId]?.releaseModifiers()
         rdpSessions.remove(serverId)?.close()
         metricsCache.remove(serverId)
         updateServer(serverId) { if (it.state == ServerState.Connected) it.copy(state = ServerState.Ready) else it }

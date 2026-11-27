@@ -31,6 +31,7 @@
 #include <freerdp/scancode.h>
 #include <freerdp/error.h>
 #include <freerdp/graphics.h>
+#include <freerdp/autodetect.h>
 #include <freerdp/event.h>
 
 #include <pthread.h>
@@ -68,6 +69,12 @@ typedef struct
 	UINT32 stride;
 	size_t capacity;
 	atomic_int dirty;
+	/* Union of the regions copied into `pixels` but not yet uploaded to the
+	 * Android bitmap. Guarded by `lock`. Empty when x1 <= x0 or y1 <= y0. */
+	UINT32 dirtyX0;
+	UINT32 dirtyY0;
+	UINT32 dirtyX1;
+	UINT32 dirtyY1;
 	atomic_int connected;
 	atomic_int stopRequested;
 	atomic_ullong frames;
@@ -262,7 +269,33 @@ static rhContext* rh_from_context(rdpContext* context)
 /* Copy the GDI framebuffer into our tightly packed RGBA buffer, growing it when
  * the host resolution changes. The caller holds rh->lock. Source and destination
  * strides are kept independent: GDI aligns its rows, Android bitmaps do not. */
-static void rh_blit_locked(rhContext* rh, rdpGdi* gdi)
+/* Called with `lock` held. Accumulates the region the renderer still owes the
+ * bitmap, so a small caret blink does not cost a full-screen copy. */
+static void rh_dirty_union_locked(rhContext* rh, UINT32 x0, UINT32 y0, UINT32 x1, UINT32 y1)
+{
+	if (x1 <= x0 || y1 <= y0)
+		return;
+	if (rh->dirtyX1 <= rh->dirtyX0 || rh->dirtyY1 <= rh->dirtyY0)
+	{
+		rh->dirtyX0 = x0;
+		rh->dirtyY0 = y0;
+		rh->dirtyX1 = x1;
+		rh->dirtyY1 = y1;
+		return;
+	}
+	if (x0 < rh->dirtyX0)
+		rh->dirtyX0 = x0;
+	if (y0 < rh->dirtyY0)
+		rh->dirtyY0 = y0;
+	if (x1 > rh->dirtyX1)
+		rh->dirtyX1 = x1;
+	if (y1 > rh->dirtyY1)
+		rh->dirtyY1 = y1;
+}
+
+/* rx1 <= rx0 (or ry1 <= ry0) means "the whole desktop". */
+static void rh_blit_locked(rhContext* rh, rdpGdi* gdi, UINT32 rx0, UINT32 ry0, UINT32 rx1,
+                           UINT32 ry1)
 {
 	if (!gdi || !gdi->primary_buffer || gdi->width <= 0 || gdi->height <= 0)
 		return;
@@ -270,6 +303,7 @@ static void rh_blit_locked(rhContext* rh, rdpGdi* gdi)
 	const UINT32 w = (UINT32)gdi->width;
 	const UINT32 h = (UINT32)gdi->height;
 	const size_t needed = (size_t)w * (size_t)h * 4;
+	int grew = 0;
 
 	if (!rh->pixels || rh->capacity < needed)
 	{
@@ -279,25 +313,61 @@ static void rh_blit_locked(rhContext* rh, rdpGdi* gdi)
 		memset(grown, 0, needed);
 		rh->pixels = grown;
 		rh->capacity = needed;
+		grew = 1;
+	}
+
+	/* A geometry change invalidates every row, so the region argument is moot. */
+	if (grew || rh->width != w || rh->height != h)
+	{
+		rx0 = 0;
+		ry0 = 0;
+		rx1 = w;
+		ry1 = h;
+	}
+	else
+	{
+		if (rx1 <= rx0 || ry1 <= ry0)
+		{
+			rx0 = 0;
+			ry0 = 0;
+			rx1 = w;
+			ry1 = h;
+		}
+		if (rx1 > w)
+			rx1 = w;
+		if (ry1 > h)
+			ry1 = h;
+		if (rx0 >= rx1 || ry0 >= ry1)
+			return;
 	}
 
 	const size_t dstStride = (size_t)w * 4;
 	const size_t srcStride = (size_t)gdi->stride;
 	const uint8_t* src = gdi->primary_buffer;
-	for (UINT32 y = 0; y < h; y++)
-		memcpy(rh->pixels + (size_t)y * dstStride, src + (size_t)y * srcStride, dstStride);
+	const size_t rowBytes = (size_t)(rx1 - rx0) * 4;
+	const size_t colOffset = (size_t)rx0 * 4;
+	for (UINT32 y = ry0; y < ry1; y++)
+		memcpy(rh->pixels + (size_t)y * dstStride + colOffset,
+		       src + (size_t)y * srcStride + colOffset, rowBytes);
 
 	rh->width = w;
 	rh->height = h;
 	rh->stride = (UINT32)dstStride;
+	rh_dirty_union_locked(rh, rx0, ry0, rx1, ry1);
 }
 
 static BOOL rh_begin_paint(rdpContext* context)
 {
 	rdpGdi* gdi = context->gdi;
+	/* Returning FALSE here makes gdi_OutputUpdate abandon the surface, and a
+	 * FALSE EndPaint is escalated to ERROR_INTERNAL_ERROR which closes the
+	 * graphics channel. A session reactivation (opening an app on the host)
+	 * briefly leaves the primary without a window, so skip instead of failing. */
 	if (!gdi || !gdi->primary || !gdi->primary->hdc || !gdi->primary->hdc->hwnd)
-		return FALSE;
+		return TRUE;
 	HGDI_WND hwnd = gdi->primary->hdc->hwnd;
+	if (!hwnd->invalid)
+		return TRUE;
 	hwnd->invalid->null = TRUE;
 	hwnd->ninvalid = 0;
 	return TRUE;
@@ -308,14 +378,26 @@ static BOOL rh_end_paint(rdpContext* context)
 	rhContext* rh = rh_from_context(context);
 	rdpGdi* gdi = context->gdi;
 	if (!gdi || !gdi->primary || !gdi->primary->hdc || !gdi->primary->hdc->hwnd)
-		return FALSE;
-
-	HGDI_WND hwnd = gdi->primary->hdc->hwnd;
-	if (hwnd->invalid->null)
 		return TRUE;
 
+	HGDI_WND hwnd = gdi->primary->hdc->hwnd;
+	if (!hwnd->invalid || hwnd->invalid->null)
+		return TRUE;
+
+	/* Only the invalidated rectangle changed. Copying the whole desktop here
+	 * cost two full-frame memcpys per frame at 1600x900. */
+	INT32 ix0 = hwnd->invalid->left;
+	INT32 iy0 = hwnd->invalid->top;
+	INT32 ix1 = hwnd->invalid->right;
+	INT32 iy1 = hwnd->invalid->bottom;
+	if (ix0 < 0)
+		ix0 = 0;
+	if (iy0 < 0)
+		iy0 = 0;
+
 	pthread_mutex_lock(&rh->lock);
-	rh_blit_locked(rh, gdi);
+	rh_blit_locked(rh, gdi, (UINT32)ix0, (UINT32)iy0, ix1 > 0 ? (UINT32)ix1 : 0,
+	               iy1 > 0 ? (UINT32)iy1 : 0);
 	pthread_mutex_unlock(&rh->lock);
 
 	atomic_fetch_add(&rh->frames, 1);
@@ -343,7 +425,7 @@ static BOOL rh_desktop_resize(rdpContext* context)
 	}
 
 	pthread_mutex_lock(&rh->lock);
-	rh_blit_locked(rh, gdi);
+	rh_blit_locked(rh, gdi, 0, 0, 0, 0);
 	pthread_mutex_unlock(&rh->lock);
 	atomic_store(&rh->dirty, 1);
 	LOGI("desktop resized to %ux%u", gdi->width, gdi->height);
@@ -602,7 +684,7 @@ static BOOL rh_post_connect(freerdp* instance)
 	update->DesktopResize = rh_desktop_resize;
 
 	pthread_mutex_lock(&rh->lock);
-	rh_blit_locked(rh, gdi);
+	rh_blit_locked(rh, gdi, 0, 0, 0, 0);
 	pthread_mutex_unlock(&rh->lock);
 
 	atomic_store(&rh->connected, 1);
@@ -717,10 +799,19 @@ static DWORD WINAPI rh_thread(LPVOID param)
 		}
 	}
 
+	const UINT32 lastError = freerdp_get_last_error(context);
+	rh->lastError = lastError;
 	freerdp_disconnect(instance);
 	freerdp_client_stop(context);
 	atomic_store(&rh->connected, 0);
-	rh_notify_state(rh, RH_STATE_DISCONNECTED, "closed");
+	/* The Kotlin side used to ignore this notification once the session was up,
+	 * so a dropped link left a frozen picture under a permanent "connecting"
+	 * overlay. Carry the reason so the UI can say what happened. */
+	char reason[192];
+	const char* errorText = freerdp_get_last_error_string(lastError);
+	snprintf(reason, sizeof(reason), "closed 0x%08X %s", (unsigned)lastError,
+	         errorText ? errorText : "unknown");
+	rh_notify_state(rh, RH_STATE_DISCONNECTED, reason);
 	ExitThread(status);
 	return status;
 }
@@ -753,6 +844,10 @@ JNIEXPORT jlong JNICALL Java_app_remotehub_rdp_NativeRdp_nativeCreate(JNIEnv* en
 	rh->vm = g_vm;
 	rh->callback = (*env)->NewGlobalRef(env, callback);
 	atomic_init(&rh->dirty, 0);
+	rh->dirtyX0 = 0;
+	rh->dirtyY0 = 0;
+	rh->dirtyX1 = 0;
+	rh->dirtyY1 = 0;
 	atomic_init(&rh->connected, 0);
 	atomic_init(&rh->stopRequested, 0);
 	atomic_init(&rh->frames, 0);
@@ -822,6 +917,10 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeConnect(
 	freerdp_settings_set_bool(settings, FreeRDP_SupportErrorInfoPdu, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_SupportStatusInfoPdu, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_AutoReconnectionEnabled, TRUE);
+	/* Lets the host measure the link so rdpContext::autodetect carries a real
+	 * RTT. Without it the UI had to open a TCP connection to 3389 every second
+	 * just to have a ping number, which the RDP listener sees as a new client. */
+	freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, TRUE);
 	freerdp_settings_set_uint32(settings, FreeRDP_AutoReconnectMaxRetries, 8);
 	freerdp_settings_set_bool(settings, FreeRDP_TcpKeepAlive, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, nla ? TRUE : FALSE);
@@ -905,9 +1004,51 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeAllocFrame(JNI
 	rh->height = (UINT32)h;
 	rh->stride = (UINT32)w * 4;
 	memset(buffer, 0, needed);
+	rh->dirtyX0 = 0;
+	rh->dirtyY0 = 0;
+	rh->dirtyX1 = (UINT32)w;
+	rh->dirtyY1 = (UINT32)h;
 	pthread_mutex_unlock(&rh->lock);
 	atomic_store(&rh->dirty, 1);
 	return JNI_TRUE;
+}
+
+/* { roundTripMillis, bytesIn, bytesOut } straight from the engine. The RTT is
+ * measured by the RDP autodetect PDUs, and the byte counters are the actual
+ * protocol traffic -- not width*height*fps, which is raw uncompressed pixels
+ * and overstates the link by two orders of magnitude. */
+JNIEXPORT jlongArray JNICALL Java_app_remotehub_rdp_NativeRdp_nativeNetStats(JNIEnv* env,
+                                                                          jclass cls,
+                                                                          jlong handle)
+{
+	rhContext* rh = (rhContext*)(intptr_t)handle;
+	jlong values[3] = { 0, 0, 0 };
+	if (rh)
+	{
+		rdpContext* context = &rh->common.context;
+		rdpAutoDetect* autodetect = context->autodetect;
+		if (autodetect)
+		{
+			UINT32 rtt = autodetect->netCharAverageRTT;
+			if (rtt == 0)
+				rtt = autodetect->netCharBaseRTT;
+			values[0] = (jlong)rtt;
+		}
+		UINT64 inBytes = 0;
+		UINT64 outBytes = 0;
+		UINT64 inPackets = 0;
+		UINT64 outPackets = 0;
+		if (context->rdp &&
+		    freerdp_get_stats(context->rdp, &inBytes, &outBytes, &inPackets, &outPackets))
+		{
+			values[1] = (jlong)inBytes;
+			values[2] = (jlong)outBytes;
+		}
+	}
+	jlongArray result = (*env)->NewLongArray(env, 3);
+	if (result)
+		(*env)->SetLongArrayRegion(env, result, 0, 3, values);
+	return result;
 }
 
 JNIEXPORT jint JNICALL Java_app_remotehub_rdp_NativeRdp_nativeRender(JNIEnv* env, jclass cls,
@@ -930,21 +1071,42 @@ JNIEXPORT jint JNICALL Java_app_remotehub_rdp_NativeRdp_nativeRender(JNIEnv* env
 		return -1;
 
 	pthread_mutex_lock(&rh->lock);
-	UINT32 w = rh->width < info.width ? rh->width : info.width;
-	UINT32 h = rh->height < info.height ? rh->height : info.height;
-	if (rh->pixels && dst && w && h)
+	const UINT32 w = rh->width < info.width ? rh->width : info.width;
+	const UINT32 h = rh->height < info.height ? rh->height : info.height;
+	UINT32 x0 = rh->dirtyX0;
+	UINT32 y0 = rh->dirtyY0;
+	UINT32 x1 = rh->dirtyX1;
+	UINT32 y1 = rh->dirtyY1;
+	rh->dirtyX0 = 0;
+	rh->dirtyY0 = 0;
+	rh->dirtyX1 = 0;
+	rh->dirtyY1 = 0;
+	if (x1 > w)
+		x1 = w;
+	if (y1 > h)
+		y1 = h;
+	if (x0 > x1)
+		x0 = x1;
+	if (y0 > y1)
+		y0 = y1;
+	int copied = 0;
+	if (rh->pixels && dst && x1 > x0 && y1 > y0)
 	{
-		size_t rowBytes = (size_t)w * 4;
-		for (UINT32 y = 0; y < h; y++)
+		const size_t rowBytes = (size_t)(x1 - x0) * 4;
+		const size_t colOffset = (size_t)x0 * 4;
+		for (UINT32 y = y0; y < y1; y++)
 		{
-			memcpy((uint8_t*)dst + (size_t)y * info.stride, rh->pixels + (size_t)y * rh->stride,
-			       rowBytes);
+			memcpy((uint8_t*)dst + (size_t)y * info.stride + colOffset,
+			       rh->pixels + (size_t)y * rh->stride + colOffset, rowBytes);
 		}
+		copied = 1;
 	}
 	pthread_mutex_unlock(&rh->lock);
 
 	AndroidBitmap_unlockPixels(env, bitmap);
-	return 1;
+	/* The dirty flag can be re-raised by a paint that landed between the
+	 * exchange above and the lock; an empty region then means nothing to draw. */
+	return copied ? 1 : 0;
 }
 
 JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeMouse(JNIEnv* env, jclass cls,

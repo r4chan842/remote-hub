@@ -2,6 +2,7 @@ package app.remotehub.rdp
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.SystemClock
 import app.remotehub.data.SecureStore
 import app.remotehub.domain.ServerSession
 import app.remotehub.diag.Diagnostics
@@ -18,34 +19,55 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * One live RDP session.
+ *
+ * The session has an explicit phase instead of deriving "connecting" from the
+ * socket flag. That derivation was the cause of the permanent connecting overlay:
+ * when the engine dropped the link, `connected` went false, the UI read that as
+ * "still handshaking", and the last frame stayed on screen under a spinner forever.
+ */
 class RdpSession(
     private val context: Context,
     private val node: TailscaleNode,
     private val server: ServerSession,
     private val store: SecureStore,
 ) {
+    private enum class Phase { Handshake, Live, Reconnecting, Closed }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var handle: Long = 0
     private var forwardPort: Int = 0
     private var pumpJob: Job? = null
     private var statsJob: Job? = null
-    private var bitmap: Bitmap? = null
-    private var lastFrames: Long = 0
-    private var lastSampleAt: Long = 0
-    private var lastBytes: Long = 0
-    private var fingerprint: String = ""
+
+    @Volatile private var bitmap: Bitmap? = null
+
+    @Volatile private var phase: Phase = Phase.Handshake
+
+    @Volatile private var closing: Boolean = false
 
     /**
-     * FreeRDP connects on its own thread, so nativeConnect returning true only means
-     * the thread started. This is completed by the engine's own state callback, which
-     * is what lets the UI say "connected" only when a desktop actually exists.
+     * The last real measurement. The session timer used to overwrite the UI cache
+     * with a freshly built zeroed sample every second, which is why the pills read
+     * 0 ms / 0 fps / 0 kbps on a perfectly healthy session.
      */
+    @Volatile private var lastSample: RemoteMetrics? = null
+
+    private var lastFrames: Long = 0
+    private var lastSampleAt: Long = 0
+    private var lastBytes: Long = -1
+    private var fallbackRtt: Int = 0
+    private var statTicks: Int = 0
+    private var fingerprint: String = ""
+
+    /** Completed by the engine's own state callback, not by the connect call. */
     private val ready = CompletableDeferred<Unit>()
 
     /**
-     * "Connected" only means the session was negotiated. This is completed by the
-     * first frame that actually reaches the bitmap, which is the only honest signal
-     * that the user can see something.
+     * Completed by the first frame that came from a real EndPaint. The engine also
+     * raises the dirty flag once during PostConnect, so "render returned 1" alone
+     * would fire on the initial blank buffer and defeat the white-screen guard.
      */
     private val firstFrame = CompletableDeferred<Unit>()
 
@@ -54,27 +76,60 @@ class RdpSession(
     var onError: (String) -> Unit = {}
     var onFrame: (Bitmap) -> Unit = {}
 
+    /** The link died after the desktop was already up. The controller retries once. */
+    var onDropped: (String) -> Unit = {}
+
     private val listener = object : RdpListener {
         override fun onState(state: Int, message: String) {
             Diagnostics.info("rdp", "engine state=$state ${message}".trim())
             when (state) {
                 NativeRdp.STATE_FAILED -> {
+                    if (closing) return
                     val failure = IllegalStateException(message)
                     if (!ready.isCompleted) ready.completeExceptionally(failure) else onError(message)
                 }
                 NativeRdp.STATE_CERT_CHANGED -> {
+                    if (closing) return
                     val text = "host certificate changed: $message"
                     if (!ready.isCompleted) ready.completeExceptionally(IllegalStateException(text)) else onError(text)
                 }
+                NativeRdp.STATE_RECONNECTING -> {
+                    // FreeRDP is retrying internally. Say so instead of freezing.
+                    if (ready.isCompleted && !closing) {
+                        phase = Phase.Reconnecting
+                        publishMetrics()
+                    }
+                }
                 NativeRdp.STATE_DISCONNECTED -> {
-                    if (!ready.isCompleted) ready.completeExceptionally(IllegalStateException("the session closed before a desktop arrived"))
+                    if (closing) return
+                    phase = Phase.Closed
+                    if (!ready.isCompleted) {
+                        ready.completeExceptionally(
+                            IllegalStateException("the session closed before a desktop arrived: $message"),
+                        )
+                    } else {
+                        publishMetrics()
+                        onDropped(message.ifBlank { "the remote session closed" })
+                    }
                 }
                 NativeRdp.STATE_CONNECTED -> {
                     fingerprint = runCatching { NativeRdp.fingerprint(handle) }.getOrDefault("")
                     if (fingerprint.isNotBlank()) {
                         store.put("$FINGERPRINT_PREFIX${server.id}", fingerprint)
                     }
-                    if (!ready.isCompleted) ready.complete(Unit)
+                    val reactivated = ready.isCompleted
+                    // Stay in Handshake until a real frame lands, otherwise the overlay
+                    // lifts onto a blank desktop -- the original white-screen experience.
+                    if (firstFrame.isCompleted) phase = Phase.Live
+                    if (!reactivated) {
+                        ready.complete(Unit)
+                    } else {
+                        // A host reactivation (opening an app, UAC, resolution change)
+                        // lands here. Clear the overlay and repaint everything.
+                        Diagnostics.info("rdp", "session reactivated")
+                        runCatching { NativeRdp.allocFrame(handle, NativeRdp.width(handle), NativeRdp.height(handle)) }
+                        publishMetrics()
+                    }
                 }
                 else -> Unit
             }
@@ -122,9 +177,6 @@ class RdpSession(
             colorDepth = 24,
             nla = true,
             graphicsPipeline = graphicsPipeline,
-            // RemoteFX and planar are decoded inside libfreerdp. H.264 additionally
-            // needs the bundled decoder to load, so it is opt-in rather than the
-            // only path to a picture.
             h264 = false,
             clipboard = true,
             audio = false,
@@ -138,30 +190,25 @@ class RdpSession(
 
         startPump()
         startStats(connection.address, connection.port)
-        // Wait for the engine, not for the thread. NLA plus a cold DERP path can take
-        // a while, so the budget is generous but bounded.
         try {
             kotlinx.coroutines.withTimeout(75_000) { ready.await() }
         } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
             error("the desktop did not appear within 75s (the session may still be logging on)")
         }
         Diagnostics.info("rdp", "desktop is live at ${NativeRdp.width(handle)}x${NativeRdp.height(handle)}")
-        // A negotiated session that produces no frames is the white-screen case.
-        // Fail loudly here so the caller can retry on the legacy bitmap path instead
-        // of leaving the user staring at an empty desktop.
         try {
             kotlinx.coroutines.withTimeout(15_000) { firstFrame.await() }
         } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
             error("no graphics frames arrived (graphicsPipeline=$graphicsPipeline)")
         }
+        phase = Phase.Live
         Diagnostics.info("rdp", "first frame rendered")
+        publishMetrics()
     }
 
     /**
      * FreeRDP refuses to create a client context without a HOME directory: it derives
      * its config path (and the certificate store used during TLS verification) from it.
-     * An Android app process usually has no HOME at all, so point it at app storage
-     * before the engine is created. Values already set by the tunnel are left alone.
      */
     private fun ensureNativePaths() {
         val base = java.io.File(context.filesDir, "rdp")
@@ -181,13 +228,18 @@ class RdpSession(
         }.onFailure { Diagnostics.warn("rdp", "could not prepare native directories", it) }
     }
 
+    /**
+     * The old bitmap is deliberately not recycled: Compose may still hold it for the
+     * frame currently on screen, and recycling it produced
+     * "Canvas: trying to use a recycled bitmap". Android reclaims the pixels through
+     * the native allocation registry once the last reference drops.
+     */
     private fun ensureBitmap(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
         val current = bitmap
-        if (current != null && current.width == width && current.height == height) return
-        current?.recycle()
+        if (current != null && !current.isRecycled && current.width == width && current.height == height) return
         bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-            eraseColor(0xFF101317.toInt())
+            eraseColor(0xFF07080A.toInt())
         }
     }
 
@@ -195,19 +247,26 @@ class RdpSession(
         pumpJob?.cancel()
         pumpJob = scope.launch {
             var failures = 0
+            var knownWidth = 0
+            var knownHeight = 0
             while (isActive) {
-                // The host owns the resolution. When Windows reactivates the session
-                // with a different size, the bitmap must be rebuilt or every frame is
-                // rendered into a buffer of the wrong shape.
-                val hostWidth = NativeRdp.width(handle)
-                val hostHeight = NativeRdp.height(handle)
-                if (hostWidth > 0 && hostHeight > 0) {
+                val session = handle
+                if (session == 0L) {
+                    delay(16)
+                    continue
+                }
+                val hostWidth = NativeRdp.width(session)
+                val hostHeight = NativeRdp.height(session)
+                // Only hop to the main thread when the geometry actually changed.
+                // This used to run 60 times a second even on an idle desktop.
+                if (hostWidth > 0 && hostHeight > 0 && (hostWidth != knownWidth || hostHeight != knownHeight)) {
                     withContext(Dispatchers.Main) { ensureBitmap(hostWidth, hostHeight) }
+                    knownWidth = hostWidth
+                    knownHeight = hostHeight
                 }
                 val target = bitmap
-                if (target != null && handle != 0L) {
-                    // A render failure must not spin silently or take the app down.
-                    val result = runCatching { NativeRdp.render(handle, target) }
+                if (target != null && !target.isRecycled) {
+                    val result = runCatching { NativeRdp.render(session, target) }
                         .onFailure { failure ->
                             failures += 1
                             if (failures == 1 || failures % 60 == 0) {
@@ -216,7 +275,10 @@ class RdpSession(
                         }
                         .getOrDefault(0)
                     if (result == 1) {
-                        if (!firstFrame.isCompleted) firstFrame.complete(Unit)
+                        failures = 0
+                        if (!firstFrame.isCompleted && NativeRdp.frames(session) > 0) {
+                            firstFrame.complete(Unit)
+                        }
                         withContext(Dispatchers.Main) { onFrame(target) }
                     }
                     if (failures >= 240) {
@@ -235,73 +297,147 @@ class RdpSession(
         statsJob = scope.launch {
             while (isActive) {
                 delay(1000)
-                // Surface the engine's own diagnostics; a codec or channel failure is
-                // otherwise invisible because WinPR logs to a stderr that does not exist.
-                runCatching { NativeRdp.drainEngineLog() }.getOrDefault("")
-                    .lineSequence()
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                    .forEach { line ->
-                        when {
-                            line.startsWith("E ") -> Diagnostics.error("rdp-engine", line.drop(2))
-                            line.startsWith("W ") -> Diagnostics.warn("rdp-engine", line.drop(2))
-                            else -> Diagnostics.info("rdp-engine", line.drop(2))
-                        }
-                    }
-                if (handle == 0L) continue
+                drainEngineLog()
+                if (handle == 0L || closing) continue
                 val sample = runCatching { collectMetrics(host, port) }
                     .onFailure { Diagnostics.warn("rdp", "metrics sample failed", it) }
                     .getOrNull() ?: continue
+                lastSample = sample
                 withContext(Dispatchers.Main) { onUpdate(sample) }
             }
         }
     }
 
+    private fun drainEngineLog() {
+        runCatching { NativeRdp.drainEngineLog() }.getOrDefault("")
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .forEach { line ->
+                when {
+                    line.startsWith("E ") -> Diagnostics.error("rdp-engine", line.drop(2))
+                    line.startsWith("W ") -> Diagnostics.warn("rdp-engine", line.drop(2))
+                    else -> Diagnostics.info("rdp-engine", line.drop(2))
+                }
+            }
+    }
+
+    private fun publishMetrics() {
+        val sample = metrics()
+        lastSample = sample
+        scope.launch(Dispatchers.Main) { onUpdate(sample) }
+    }
+
     private suspend fun collectMetrics(host: String, port: Int): RemoteMetrics {
-        val frames = NativeRdp.frames(handle)
-        val now = System.currentTimeMillis()
-        val elapsed = if (lastSampleAt == 0L) 1000 else now - lastSampleAt
-        val fps = if (elapsed > 0) ((frames - lastFrames) * 1000 / elapsed).toInt() else 0
+        val session = handle
+        val frames = NativeRdp.frames(session)
+        val now = SystemClock.elapsedRealtime()
+        val elapsed = if (lastSampleAt == 0L) 0L else (now - lastSampleAt).coerceAtLeast(1L)
+        val fps = if (elapsed > 0) ((frames - lastFrames) * 1000 / elapsed).toInt().coerceAtLeast(0) else 0
         lastFrames = frames
         lastSampleAt = now
-        val width = NativeRdp.width(handle)
-        val height = NativeRdp.height(handle)
-        val latency = node.latency(host, port, 3000)
-        val bytes = width.toLong() * height * 4 * fps
-        val kbps = if (bytes > 0) (bytes * 8 / 1000).toInt() else 0
-        lastBytes = bytes
+
+        val net = runCatching { NativeRdp.netStats(session) }.getOrDefault(LongArray(3))
+        var rtt = net.getOrElse(0) { 0L }.toInt()
+        val totalBytes = net.getOrElse(1) { 0L } + net.getOrElse(2) { 0L }
+        // bytes * 8 / millis is exactly kilobits per second.
+        val kbps = if (elapsed > 0 && lastBytes >= 0 && totalBytes >= lastBytes) {
+            ((totalBytes - lastBytes) * 8 / elapsed).toInt().coerceAtLeast(0)
+        } else {
+            0
+        }
+        lastBytes = totalBytes
+
+        statTicks += 1
+        if (rtt <= 0) {
+            // The host did not negotiate autodetect. Fall back to a tunnel probe,
+            // but only every fifth sample: dialling 3389 once a second makes the
+            // RDP listener accept and drop a client every second.
+            if (statTicks % 5 == 1) {
+                val probed = runCatching { node.latency(host, port, 2500) }.getOrDefault(-1)
+                if (probed >= 0) fallbackRtt = probed
+            }
+            rtt = fallbackRtt
+        }
+
+        val width = NativeRdp.width(session)
+        val height = NativeRdp.height(session)
         return RemoteMetrics(
-        latencyMillis = if (latency < 0) 0 else latency,
-        framesPerSecond = fps,
-        kilobitsPerSecond = kbps,
-        resolutionLabel = if (width > 0) "${width}x$height" else "—",
-        trackpadMode = trackpadMode,
-        connecting = !NativeRdp.connected(handle),
+            latencyMillis = rtt.coerceAtLeast(0),
+            framesPerSecond = fps,
+            kilobitsPerSecond = kbps,
+            resolutionLabel = if (width > 0 && height > 0) "${width}x$height" else "—",
+            trackpadMode = trackpadMode,
+            connecting = phase == Phase.Handshake || phase == Phase.Reconnecting,
         )
     }
 
-    fun metrics(): RemoteMetrics = RemoteMetrics(
-        latencyMillis = 0,
-        framesPerSecond = 0,
-        kilobitsPerSecond = 0,
-        resolutionLabel = "${NativeRdp.width(handle)}x${NativeRdp.height(handle)}",
-        trackpadMode = trackpadMode,
-        connecting = !NativeRdp.connected(handle),
-    )
+    /** Never zeroes a real measurement; only the phase and geometry are refreshed. */
+    fun metrics(): RemoteMetrics {
+        val base = lastSample
+        val width = NativeRdp.width(handle)
+        val height = NativeRdp.height(handle)
+        return RemoteMetrics(
+            latencyMillis = base?.latencyMillis ?: 0,
+            framesPerSecond = base?.framesPerSecond ?: 0,
+            kilobitsPerSecond = base?.kilobitsPerSecond ?: 0,
+            resolutionLabel = if (width > 0 && height > 0) "${width}x$height" else (base?.resolutionLabel ?: "—"),
+            trackpadMode = trackpadMode,
+            connecting = phase == Phase.Handshake || phase == Phase.Reconnecting,
+        )
+    }
+
+    // ------------------------------------------------------------------- input
 
     fun sendPointer(flags: Int, x: Int, y: Int) {
         runCatching { NativeRdp.mouse(handle, flags, x, y) }
     }
 
-    fun sendWheel(delta: Int, x: Int, y: Int) {
-        runCatching { NativeRdp.wheel(handle, NativeRdp.PTR_WHEEL or delta, x, y) }
+    fun sendMove(x: Int, y: Int) = sendPointer(NativeRdp.PTR_MOVE, x, y)
+
+    fun sendButtonDown(button: Int, x: Int, y: Int) = sendPointer(buttonDownFlag(button), x, y)
+
+    fun sendButtonUp(button: Int, x: Int, y: Int) = sendPointer(buttonUpFlag(button), x, y)
+
+    /** A plain left click. Windows derives double-clicks from the interval between two of these. */
+    fun sendClick(x: Int, y: Int) {
+        sendPointer(NativeRdp.PTR_MOVE, x, y)
+        sendPointer(NativeRdp.PTR_DOWN_LEFT, x, y)
+        sendPointer(NativeRdp.PTR_UP_LEFT, x, y)
     }
 
+    fun sendRightClick(x: Int, y: Int) {
+        sendPointer(NativeRdp.PTR_MOVE, x, y)
+        sendPointer(NativeRdp.PTR_DOWN_RIGHT, x, y)
+        sendPointer(NativeRdp.PTR_UP_RIGHT, x, y)
+    }
+
+    fun sendMiddleClick(x: Int, y: Int) {
+        sendPointer(NativeRdp.PTR_MOVE, x, y)
+        sendPointer(NativeRdp.PTR_DOWN_MIDDLE, x, y)
+        sendPointer(NativeRdp.PTR_UP_MIDDLE, x, y)
+    }
+
+    /**
+     * Wheel rotation is a signed nine-bit field; bit 8 is PTR_FLAGS_WHEEL_NEGATIVE.
+     * OR-ing a raw negative Int into the flags happened to work for -120 but broke
+     * for every other magnitude, so encode it explicitly.
+     */
+    fun sendWheel(delta: Int, x: Int, y: Int, horizontal: Boolean = false) {
+        if (delta == 0) return
+        val rotation = delta.coerceIn(-255, 255) and 0x01FF
+        val base = if (horizontal) NativeRdp.PTR_HWHEEL else NativeRdp.PTR_WHEEL
+        runCatching { NativeRdp.wheel(handle, base or rotation, x, y) }
+    }
+
+    /** Kept for hosts with RDPEI. Not used for taps: it synthesises its own mouse click. */
     fun sendTouch(flags: Int, finger: Int, x: Int, y: Int) {
         runCatching { NativeRdp.touch(handle, flags, finger, 0, x, y) }
     }
 
     fun sendKey(scancode: Int, down: Boolean) = runCatching { NativeRdp.key(handle, scancode, down) }.isSuccess
+
+    fun sendSync(flags: Int) = runCatching { NativeRdp.sync(handle, flags) }.isSuccess
 
     fun sendText(text: String) {
         text.forEach { code -> runCatching { NativeRdp.unicode(handle, code.code) } }
@@ -316,6 +452,16 @@ class RdpSession(
         NativeRdp.key(handle, 0x1D, false)
     }
 
+    /** Releases every modifier so a lost gesture cannot leave Ctrl or Shift stuck down. */
+    fun releaseModifiers() = runCatching {
+        listOf(0x1D, 0x2A, 0x36, 0x38, 0x15B, 0x15C, 0x138, 0x12A).forEach {
+            NativeRdp.key(handle, it, false)
+        }
+        NativeRdp.mouse(handle, NativeRdp.PTR_UP_LEFT, 0, 0)
+        NativeRdp.mouse(handle, NativeRdp.PTR_UP_RIGHT, 0, 0)
+        NativeRdp.mouse(handle, NativeRdp.PTR_UP_MIDDLE, 0, 0)
+    }
+
     fun sendClipboard(text: String): Boolean = runCatching { NativeRdp.sendClipboard(handle, text) }.getOrDefault(false)
 
     fun resize(width: Int, height: Int): Boolean {
@@ -324,11 +470,13 @@ class RdpSession(
         return NativeRdp.resize(handle, width, height)
     }
 
-    fun currentBitmap(): Bitmap? = bitmap
+    fun currentBitmap(): Bitmap? = bitmap?.takeIf { !it.isRecycled }
 
     fun handleForInput(): Long = handle
 
     fun close() {
+        closing = true
+        phase = Phase.Closed
         pumpJob?.cancel()
         statsJob?.cancel()
         if (handle != 0L) {
@@ -337,9 +485,21 @@ class RdpSession(
             runCatching { NativeRdp.destroy(handle) }
             handle = 0
         }
-        runCatching { bitmap?.recycle() }
+        // Not recycled: the last drawn frame may still be referenced by Compose.
         bitmap = null
         scope.cancel()
+    }
+
+    private fun buttonDownFlag(button: Int): Int = when (button) {
+        2 -> NativeRdp.PTR_DOWN_RIGHT
+        3 -> NativeRdp.PTR_DOWN_MIDDLE
+        else -> NativeRdp.PTR_DOWN_LEFT
+    }
+
+    private fun buttonUpFlag(button: Int): Int = when (button) {
+        2 -> NativeRdp.PTR_UP_RIGHT
+        3 -> NativeRdp.PTR_UP_MIDDLE
+        else -> NativeRdp.PTR_UP_LEFT
     }
 
     companion object {
