@@ -34,28 +34,25 @@ gomobile init
 # build overlay instead of editing the dependency in place.
 # ---------------------------------------------------------------------------
 TSNET_DIR="$(go list -m -f '{{.Dir}}' tailscale.com)"
-test -f "$TSNET_DIR/tsnet/tsnet.go"
-mkdir -p .overlay
-python3 - "$TSNET_DIR/tsnet/tsnet.go" ".overlay/tsnet.go" <<'PYEOF'
+TSNET_FILE="$TSNET_DIR/tsnet/tsnet.go"
+test -f "$TSNET_FILE"
+# The module cache is extracted read-only; make just this one file writable.
+chmod u+w "$TSNET_DIR/tsnet" "$TSNET_FILE"
+python3 - "$TSNET_FILE" <<'PYEOF'
 import sys
-source, target = sys.argv[1], sys.argv[2]
-text = open(source, encoding="utf-8").read()
-needle = '\t\tcase "ios", "darwin":\n'
-if needle not in text:
-    raise SystemExit("tsnet fallback switch not found; upstream changed shape")
-text = text.replace(needle, '\t\tcase "ios", "darwin", "android":\n', 1)
-open(target, "w", encoding="utf-8").write(text)
-print("patched tsnet android executable fallback")
+target = sys.argv[1]
+text = open(target, encoding="utf-8").read()
+patched = '\t\tcase "ios", "darwin", "android":\n'
+if patched in text:
+    print("tsnet android fallback already present")
+else:
+    needle = '\t\tcase "ios", "darwin":\n'
+    if needle not in text:
+        raise SystemExit("tsnet fallback switch not found; upstream changed shape")
+    open(target, "w", encoding="utf-8").write(text.replace(needle, patched, 1))
+    print("patched tsnet android executable fallback")
 PYEOF
-python3 - "$TSNET_DIR/tsnet/tsnet.go" "$PWD/.overlay/tsnet.go" ".overlay/overlay.json" <<'PYEOF'
-import json, sys
-original, replacement, target = sys.argv[1], sys.argv[2], sys.argv[3]
-json.dump({"Replace": {original: replacement}}, open(target, "w"))
-print("overlay:", target)
-PYEOF
-# GOFLAGS only applies to commands that understand -overlay, so go env and the
-# module commands above are unaffected.
-export GOFLAGS="-overlay=$PWD/.overlay/overlay.json"
+grep -n 'case "ios", "darwin", "android"' "$TSNET_FILE"
 
 mkdir -p out
 gomobile bind \
