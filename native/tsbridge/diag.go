@@ -250,7 +250,7 @@ func diagWrite(rec Record) {
 	if diag.file == nil {
 		return
 	}
-	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s\n",
+	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%d\n",
 		rec.TimeMillis, rec.Level, rec.Source,
 		strings.ReplaceAll(rec.Message, "\n", " ⏎ "), rec.Seq)
 	n, err := diag.file.WriteString(line)
