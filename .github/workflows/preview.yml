@@ -15,7 +15,7 @@ on:
       tag:
         description: "Pre-release tag (vMAJOR.MINOR.PATCH-preview.N)"
         required: true
-        default: "v1.0.1-preview.1"
+        default: "v1.1.0-preview.10"
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TAG: ${{ inputs.tag || 'v1.0.1-preview.1' }}
+      TAG: ${{ inputs.tag || 'v1.1.0-preview.10' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -39,7 +39,14 @@ jobs:
           set -euo pipefail
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || { echo "bad tag $TAG" >&2; exit 1; }
           echo "VERSION_NAME=${TAG#v}" >> "$GITHUB_ENV"
-          echo "VERSION_CODE=$(date -u +%y%m%d%H)" >> "$GITHUB_ENV"
+          # Minute-monotonic versionCode. The old %y%m%d%H formula gave two builds
+          # in the same hour the same code, so an update could look like a reinstall.
+          # The offset keeps every new code above the last hour-based one.
+          EPOCH=$(date -u -d '2026-11-27T19:00:00Z' +%s)
+          NOW=$(date -u +%s)
+          DELTA=$(( (NOW - EPOCH) / 60 ))
+          if [ "$DELTA" -lt 0 ]; then DELTA=0; fi
+          echo "VERSION_CODE=$(( 26112719 + DELTA ))" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
