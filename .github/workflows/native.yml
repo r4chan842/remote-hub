@@ -28,7 +28,6 @@ concurrency:
 env:
   FREERDP_VERSION: "3.33.1"
   GO_VERSION: "1.27.4"
-  NDK_VERSION: "27.2.12479018"
 
 jobs:
   tsnet:
@@ -48,12 +47,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: false
 
-      - name: Install Android NDK
-        run: |
-          set -euo pipefail
-          SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)"
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "ndk;${NDK_VERSION}" >/dev/null
-          echo "GOMOBILE_NDK=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - name: Select Android NDK
+        run: ./scripts/setup-ndk.sh
 
       - name: Resolve Go module graph
         working-directory: native/tsbridge
@@ -105,12 +100,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build cmake pkg-config nasm perl python3 xz-utils
 
-      - name: Install Android NDK
-        run: |
-          set -euo pipefail
-          SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)"
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "ndk;${NDK_VERSION}" >/dev/null
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+      - name: Select Android NDK
+        run: ./scripts/setup-ndk.sh
 
       - name: Fetch FreeRDP source
         run: |
