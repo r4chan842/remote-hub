@@ -1,0 +1,49 @@
+# One-shot publisher used to ship v1.0.1 without a manual dispatch:
+# it tags the tested main commit and asks the Release workflow to publish it.
+# Nothing runs unless a push touches this file; the follow-up commit removes it.
+name: Publish once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-once.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: v1.0.1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Tag the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "tag ${TAG} already exists; not moving it"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="${SHA}" >/dev/null
+            echo "created ${TAG} at ${SHA}"
+          fi
+
+      - name: Dispatch the Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref main -f tag="${TAG}" -f dry_run=false
+          sleep 10
+          gh run list --workflow release.yml --limit 3 --json databaseId,status,headSha \
+            --jq '.[] | "\(.databaseId) \(.status) \(.headSha)"'
