@@ -283,13 +283,18 @@ static UINT rh_cliprdr_format_data_response(CliprdrClientContext* clip,
 	UINT32 len = response->common.dataLen;
 	if (len >= 2)
 	{
-		char utf8[8192];
-		int out = ConvertFromUnicode(CP_UTF8, 0, (const WCHAR*)data, (int)(len / 2), utf8,
-		                             sizeof(utf8) - 1, NULL, NULL);
-		if (out > 0)
+		size_t wideChars = len / sizeof(WCHAR);
+		WCHAR* wide = (WCHAR*)malloc((wideChars + 1) * sizeof(WCHAR));
+		if (wide)
 		{
-			utf8[out] = '\0';
-			rh_notify_clipboard(rh, utf8, out);
+			memcpy(wide, data, wideChars * sizeof(WCHAR));
+			wide[wideChars] = 0;
+			size_t utf8Len = 0;
+			char* utf8 = ConvertWCharToUtf8Alloc(wide, &utf8Len);
+			if (utf8 && utf8Len > 0)
+				rh_notify_clipboard(rh, utf8, (jsize)utf8Len);
+			free(utf8);
+			free(wide);
 		}
 	}
 
@@ -318,11 +323,11 @@ static UINT rh_cliprdr_format_data_request(CliprdrClientContext* clip,
 		return clip->ClientFormatDataResponse(clip, &response);
 	}
 
-	WCHAR* wide = NULL;
-	int wideChars = ConvertToUnicode(CP_UTF8, 0, rh->pendingText, (int)rh->pendingTextLen, &wide, 0);
+	size_t wideChars = 0;
+	WCHAR* wide = ConvertUtf8ToWCharAlloc(rh->pendingText, &wideChars);
 	pthread_mutex_unlock(&rh->lock);
 
-	if (wideChars <= 0 || !wide)
+	if (!wide || wideChars == 0)
 	{
 		free(wide);
 		response.common.msgFlags = CB_RESPONSE_FAIL;
@@ -332,7 +337,7 @@ static UINT rh_cliprdr_format_data_request(CliprdrClientContext* clip,
 	}
 
 	response.common.msgFlags = CB_RESPONSE_OK;
-	response.common.dataLen = (UINT32)(wideChars + 1) * sizeof(WCHAR);
+	response.common.dataLen = (UINT32)wideChars * sizeof(WCHAR);
 	response.requestedFormatData = (const BYTE*)wide;
 	UINT rc = clip->ClientFormatDataResponse(clip, &response);
 	free(wide);
