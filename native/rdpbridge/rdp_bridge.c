@@ -10,6 +10,7 @@
 #include <winpr/wlog.h>
 #include <winpr/crypto.h>
 #include <winpr/string.h>
+#include <winpr/sysinfo.h>
 
 #include <freerdp/freerdp.h>
 #include <freerdp/client.h>
@@ -250,7 +251,6 @@ static UINT rh_cliprdr_monitor_ready(CliprdrClientContext* clip,
 
 static UINT rh_cliprdr_format_list(CliprdrClientContext* clip, const CLIPRDR_FORMAT_LIST* list)
 {
-	rhContext* rh = (rhContext*)clip->custom;
 	BOOL textAvailable = FALSE;
 	for (UINT32 i = 0; i < list->numFormats; i++)
 	{
@@ -262,7 +262,7 @@ static UINT rh_cliprdr_format_list(CliprdrClientContext* clip, const CLIPRDR_FOR
 	response.common.msgType = CB_FORMAT_LIST_RESPONSE;
 	response.common.msgFlags = CB_RESPONSE_OK;
 	response.common.dataLen = 0;
-	clip->ClientFormatListResponse(clip, &response);
+	(void)clip->ClientFormatListResponse(clip, &response);
 
 	if (!textAvailable)
 		return CHANNEL_RC_OK;
