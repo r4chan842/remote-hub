@@ -17,6 +17,13 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import app.remotehub.data.StoreKeys
+import app.remotehub.domain.GitHubAccount
+import app.remotehub.github.DeviceFlowClient
+import app.remotehub.github.DevicePoll
+import app.remotehub.github.GitHubClient
 import app.remotehub.design.RemoteHubTheme
 import app.remotehub.domain.AuthMethod
 import app.remotehub.domain.DeviceFlowPhase
@@ -49,12 +56,69 @@ fun RemoteHubApp() {
     var account by remember {
         mutableStateOf(
             store.get(app.remotehub.data.StoreKeys.GITHUB_LOGIN)?.let {
-                app.remotehub.domain.GitHubAccount(it, it, AuthMethod.PersonalAccessToken, emptyList(), emptyList(), "")
+                GitHubAccount(it, it, AuthMethod.entries.firstOrNull { method -> method.name == store.get(StoreKeys.GITHUB_METHOD) } ?: AuthMethod.PersonalAccessToken, emptyList(), emptyList(), "")
             },
         )
     }
     var authBusy by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
+    val idleDeviceFlow = DeviceFlowState(DeviceFlowPhase.Idle, "", DeviceFlowClient.GITHUB_DEVICE_URL, 0, 5)
+    var deviceFlow by remember { mutableStateOf(idleDeviceFlow) }
+    var deviceJob by remember { mutableStateOf<Job?>(null) }
+    var clientIdInput by remember { mutableStateOf(store.get(StoreKeys.GITHUB_CLIENT_ID).orEmpty()) }
+
+    suspend fun validateSignIn(token: String, method: AuthMethod) {
+        val client = GitHubClient(token)
+        try {
+            val result = client.validate()
+            store.put(StoreKeys.GITHUB_TOKEN, token)
+            store.put(StoreKeys.GITHUB_LOGIN, result.user.login)
+            store.put(StoreKeys.GITHUB_METHOD, method.name)
+            account = GitHubAccount(result.user.login, result.user.name ?: result.user.login, method, result.scopes, result.missing, "")
+            patInput = ""
+        } finally {
+            client.close()
+        }
+    }
+
+    fun startDeviceSignIn() {
+        if (deviceJob?.isActive == true) return
+        val clientId = clientIdInput.trim().ifBlank { System.getenv("RH_GITHUB_CLIENT_ID").orEmpty().trim() }
+        if (clientId.isBlank()) {
+            authError = "Enter an OAuth Client ID with Device Flow enabled, or use a personal access token."
+            return
+        }
+        authBusy = true
+        authError = null
+        deviceJob = scope.launch {
+            val client = DeviceFlowClient(clientId)
+            try {
+                val code = client.requestCode()
+                deviceFlow = DeviceFlowState(DeviceFlowPhase.WaitingForApproval, code.userCode, DeviceFlowClient.GITHUB_DEVICE_URL, code.expiresIn, code.interval)
+                authBusy = false
+                when (val result = client.awaitToken(code) { remaining -> deviceFlow = deviceFlow.copy(secondsRemaining = remaining) }) {
+                    is DevicePoll.Granted -> {
+                        authBusy = true
+                        validateSignIn(result.token, AuthMethod.DeviceFlow)
+                        deviceFlow = idleDeviceFlow
+                    }
+                    is DevicePoll.Failed -> {
+                        deviceFlow = idleDeviceFlow
+                        authError = result.reason
+                    }
+                    else -> Unit
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                deviceFlow = idleDeviceFlow
+                authError = error.message ?: "Could not sign in to GitHub."
+            } finally {
+                authBusy = false
+                client.close()
+            }
+        }
+    }
     var authKeyInput by remember { mutableStateOf("") }
     var expiryAlert by remember { mutableStateOf(true) }
     var biometric by remember { mutableStateOf(false) }
@@ -93,7 +157,6 @@ fun RemoteHubApp() {
                 lastError = null,
             )
             val quota = QuotaSnapshot(0, 2000, 0, 20, "6h")
-            val deviceFlow = DeviceFlowState(DeviceFlowPhase.Idle, "", "https://github.com/login/device", 0, 5)
 
             val title = when {
                 creating -> strings.createTitle
@@ -152,38 +215,51 @@ fun RemoteHubApp() {
                         method = authMethod,
                         deviceFlow = deviceFlow,
                         patInput = patInput,
-                        clientIdInput = "",
-                        onClientIdChange = {},
-                        requiredScopes = listOf("repo", "workflow", "read:user"),
-                        onMethodChange = { authMethod = it },
+                        clientIdInput = clientIdInput,
+                        onClientIdChange = {
+                            clientIdInput = it
+                            store.put(StoreKeys.GITHUB_CLIENT_ID, it.trim())
+                        },
+                        requiredScopes = GitHubClient.REQUIRED_SCOPES,
+                        onMethodChange = {
+                            if (it != authMethod && !authBusy) {
+                                deviceJob?.cancel()
+                                deviceFlow = idleDeviceFlow
+                                authError = null
+                                authMethod = it
+                            }
+                        },
                         onPatChange = { patInput = it },
-                        onCopyCode = {},
-                        onOpenGitHub = { openInBrowser("https://github.com/login/device") },
+                        onCopyCode = {
+                            runCatching {
+                                java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(deviceFlow.userCode), null)
+                            }.onFailure { authError = "Could not copy the device code." }
+                        },
+                        onOpenGitHub = {
+                            if (deviceFlow.userCode.isBlank()) startDeviceSignIn()
+                            else openInBrowser(DeviceFlowClient.GITHUB_DEVICE_URL)
+                        },
                         onCreateToken = { openInBrowser("https://github.com/settings/tokens/new?scopes=repo,workflow&description=RemoteHub") },
                         onValidatePat = {
                             val token = patInput.trim()
                             authBusy = true
                             authError = null
                             scope.launch {
-                                val client = app.remotehub.github.GitHubClient(token)
-                                runCatching { client.validate() }
-                                    .onSuccess { v ->
-                                        store.put(app.remotehub.data.StoreKeys.GITHUB_TOKEN, token)
-                                        store.put(app.remotehub.data.StoreKeys.GITHUB_LOGIN, v.user.login)
-                                        account = app.remotehub.domain.GitHubAccount(
-                                            v.user.login, v.user.name ?: v.user.login, AuthMethod.PersonalAccessToken,
-                                            v.scopes, v.missing, "",
-                                        )
-                                        patInput = ""
-                                    }
-                                    .onFailure { authError = it.message ?: "validation failed" }
-                                client.close()
-                                authBusy = false
+                                try {
+                                    validateSignIn(token, AuthMethod.PersonalAccessToken)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    authError = error.message ?: "Could not sign in to GitHub."
+                                } finally {
+                                    authBusy = false
+                                }
                             }
                         },
                         onDisconnect = {
                             store.remove(app.remotehub.data.StoreKeys.GITHUB_TOKEN)
                             store.remove(app.remotehub.data.StoreKeys.GITHUB_LOGIN)
+                            store.remove(StoreKeys.GITHUB_METHOD)
                             account = null
                         },
                         error = authError,

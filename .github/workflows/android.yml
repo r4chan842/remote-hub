@@ -63,6 +63,7 @@ jobs:
 
       - name: Build per-ABI release APKs (debug-signed, not for distribution)
         env:
+          RH_GITHUB_CLIENT_ID: ${{ vars.RH_GITHUB_CLIENT_ID }}
           VERSION_CODE: ${{ inputs.version_code }}
           VERSION_NAME: ${{ inputs.version_name }}
         run: |
@@ -73,6 +74,13 @@ jobs:
 
       - name: Verify APKs (packaging, 16 KB alignment, size)
         run: bash scripts/verify-apk.sh
+
+      - name: Report APK sizes
+        run: |
+          echo '### Android APK sizes' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^.+ size [0-9]+ bytes' build-report/apk-report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload reports
         if: always()
