@@ -82,9 +82,12 @@ fun SetupContent(
         }
     }
 
+    val highlightShape = MaterialTheme.shapes.large
+    val highlightColor = scheme.primary
+
     fun highlight(item: SetupItem): Modifier =
         if (state.highlightItem == item) {
-            Modifier.border(2.dp, scheme.primary, MaterialTheme.shapes.large)
+            Modifier.border(2.dp, highlightColor, highlightShape)
         } else {
             Modifier
         }

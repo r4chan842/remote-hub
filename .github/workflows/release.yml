@@ -147,7 +147,6 @@ jobs:
         run: gradle --no-daemon :composeApp:desktopTest :composeApp:testDebugUnitTest && python3 scripts/test-summary.py
 
       - name: Build signed per-ABI APKs
-        env:
         run: >
           gradle --no-daemon :composeApp:assembleRelease
           -PappVersionCode=${{ needs.gate.outputs.version_code }}
