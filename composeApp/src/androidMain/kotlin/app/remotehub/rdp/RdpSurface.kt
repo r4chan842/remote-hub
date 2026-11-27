@@ -98,7 +98,10 @@ fun RdpSurface(
         return
     }
 
-    val image = remember(bitmap, frameTick) { bitmap.asImageBitmap() }
+    // Deliberately NOT keyed on frameTick. Reading the tick during composition
+    // recomposed this whole composable on every frame; reading it inside the draw
+    // lambda below invalidates only the draw phase, which is the cheap one.
+    val image = remember(bitmap) { bitmap.asImageBitmap() }
 
     Canvas(
         modifier = modifier
@@ -402,6 +405,10 @@ fun RdpSurface(
                 }
             },
     ) {
+        // Deferred read: a new frame now re-draws without re-composing or
+        // re-measuring. The pixels live in the same Bitmap, so the wrapper is
+        // reused and only the layer is marked dirty.
+        frameTick
         val dw = (size.width * zoom).roundToInt().coerceAtLeast(1)
         val dh = (size.height * zoom).roundToInt().coerceAtLeast(1)
         drawImage(

@@ -259,6 +259,7 @@ class RdpSession(
             var knownWidth = 0
             var knownHeight = 0
             while (isActive) {
+                val tickStartedAt = SystemClock.elapsedRealtime()
                 val session = handle
                 if (session == 0L) {
                     delay(16)
@@ -269,7 +270,8 @@ class RdpSession(
                 // Only hop to the main thread when the geometry actually changed.
                 // This used to run 60 times a second even on an idle desktop.
                 if (hostWidth > 0 && hostHeight > 0 && (hostWidth != knownWidth || hostHeight != knownHeight)) {
-                    withContext(Dispatchers.Main) { ensureBitmap(hostWidth, hostHeight) }
+                    // Bitmap.createBitmap is thread-safe, so no main-thread hop.
+                    ensureBitmap(hostWidth, hostHeight)
                     knownWidth = hostWidth
                     knownHeight = hostHeight
                 }
@@ -288,7 +290,11 @@ class RdpSession(
                         if (!firstFrame.isCompleted && NativeRdp.frames(session) > 0) {
                             firstFrame.complete(Unit)
                         }
-                        withContext(Dispatchers.Main) { onFrame(target) }
+                        // onFrame only bumps a mutableIntStateOf. Snapshot state
+                        // is safe to write from any thread, and this removes a
+                        // main-thread round trip from every single frame -- the
+                        // pump no longer queues behind UI work.
+                        onFrame(target)
                     }
                     if (failures >= 240) {
                         Diagnostics.error("rdp", "stopping the frame pump after repeated render failures")
@@ -296,7 +302,10 @@ class RdpSession(
                         return@launch
                     }
                 }
-                delay(16)
+                // Pace to a 60Hz budget instead of adding 16ms on top of the
+                // render cost, which used to cap the pump below 60fps.
+                val spent = SystemClock.elapsedRealtime() - tickStartedAt
+                delay((16L - spent).coerceAtLeast(1L))
             }
         }
     }
