@@ -20,6 +20,9 @@
 #include <freerdp/client/disp.h>
 #include <freerdp/client/cliprdr.h>
 #include <freerdp/client/channels.h>
+#include <freerdp/client/rdpgfx.h>
+#include <freerdp/channels/rdpgfx.h>
+#include <freerdp/gdi/gfx.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/codec/region.h>
 #include <freerdp/settings.h>
@@ -75,6 +78,86 @@ typedef struct
 	size_t pendingTextLen;
 	atomic_int hasClipboardText;
 } rhContext;
+
+/* WinPR writes its diagnostics to stderr, which does not exist in an Android
+ * app process. Capture them so a codec or channel failure is visible in the
+ * in-app log rather than silently lost. */
+#define RH_LOG_SLOTS 128
+#define RH_LOG_LINE 512
+static char g_engineLog[RH_LOG_SLOTS][RH_LOG_LINE];
+static int g_logHead = 0;
+static int g_logCount = 0;
+static pthread_mutex_t g_logLock = PTHREAD_MUTEX_INITIALIZER;
+static atomic_int g_logInstalled = 0;
+
+static void rh_engine_log_push(DWORD level, const char* text)
+{
+	if (!text || !*text)
+		return;
+	char tag;
+	switch (level)
+	{
+		case WLOG_FATAL:
+		case WLOG_ERROR:
+			tag = 'E';
+			break;
+		case WLOG_WARN:
+			tag = 'W';
+			break;
+		case WLOG_INFO:
+			tag = 'I';
+			break;
+		default:
+			tag = 'D';
+			break;
+	}
+	pthread_mutex_lock(&g_logLock);
+	char* slot = g_engineLog[g_logHead];
+	snprintf(slot, RH_LOG_LINE, "%c %s", tag, text);
+	g_logHead = (g_logHead + 1) % RH_LOG_SLOTS;
+	if (g_logCount < RH_LOG_SLOTS)
+		g_logCount++;
+	pthread_mutex_unlock(&g_logLock);
+}
+
+static BOOL rh_wlog_message(const wLogMessage* msg)
+{
+	if (!msg || !msg->TextString)
+		return FALSE;
+	char line[RH_LOG_LINE];
+	const char* prefix = msg->PrefixString ? msg->PrefixString : "";
+	snprintf(line, sizeof(line), "%s%s", prefix, msg->TextString);
+	/* Trim the trailing newline WinPR adds; the app log adds its own layout. */
+	size_t len = strlen(line);
+	while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+		line[--len] = '\0';
+	rh_engine_log_push(msg->Level, line);
+	__android_log_print(ANDROID_LOG_DEBUG, "RemoteHubEngine", "%s", line);
+	return TRUE;
+}
+
+static void rh_install_engine_log(void)
+{
+	if (atomic_exchange(&g_logInstalled, 1))
+		return;
+	wLog* root = WLog_GetRoot();
+	if (!root)
+		return;
+	if (!WLog_SetLogAppenderType(root, WLOG_APPENDER_CALLBACK))
+		return;
+	wLogAppender* appender = WLog_GetLogAppender(root);
+	if (!appender)
+		return;
+	wLogCallbacks callbacks = { 0 };
+	callbacks.message = rh_wlog_message;
+	if (!WLog_ConfigureAppender(appender, "callbacks", &callbacks))
+		return;
+	if (!WLog_OpenAppender(root))
+		return;
+	if (!WLog_SetLogLevel(root, WLOG_INFO))
+		LOGW("could not raise the engine log level");
+	LOGI("engine log attached to the app diagnostics");
+}
 
 static JavaVM* g_vm = NULL;
 static rhContext* g_ctx = NULL;
@@ -386,7 +469,18 @@ static void rh_channel_connected(void* ctx, const ChannelConnectedEventArgs* e)
 	if (!e || !e->name)
 		return;
 
-	if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
+	/* FreeRDP delegates the graphics-pipeline hookup to the client: this is the
+	 * call that runs gdi_graphics_pipeline_init(gdi, gfx). Without it the RDPGFX
+	 * channel connects but no surface command ever reaches the framebuffer, so
+	 * EndPaint never fires and the desktop stays at GDI's initial 0xff fill.
+	 * The handler ignores DISP and CLIPRDR, which are set up below. */
+	freerdp_client_OnChannelConnectedEventHandler(context, e);
+
+	if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
+	{
+		LOGI("graphics pipeline attached to GDI");
+	}
+	else if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
 	{
 		rh->disp = (DispClientContext*)e->pInterface;
 		if (rh->disp)
@@ -415,6 +509,7 @@ static void rh_channel_disconnected(void* ctx, const ChannelDisconnectedEventArg
 	rhContext* rh = rh_from_context(context);
 	if (!e || !e->name)
 		return;
+	freerdp_client_OnChannelDisconnectedEventHandler(context, e);
 	if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
 		rh->disp = NULL;
 	else if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0)
@@ -688,6 +783,7 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeConnect(
 	rhContext* rh = (rhContext*)(intptr_t)handle;
 	if (!rh)
 		return JNI_FALSE;
+	rh_install_engine_log();
 	rdpContext* context = &rh->common.context;
 	rdpSettings* settings = context->settings;
 	freerdp* instance = context->instance;
@@ -1087,5 +1183,36 @@ JNIEXPORT jstring JNICALL Java_app_remotehub_rdp_NativeRdp_nativeVersion(JNIEnv*
 JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeSetLogLevel(JNIEnv* env, jclass cls,
                                                                         jint level)
 {
-	WLog_SetLogLevel(WLog_GetRoot(), (DWORD)level);
+	rh_install_engine_log();
+	if (!WLog_SetLogLevel(WLog_GetRoot(), (DWORD)level))
+		LOGW("could not set the engine log level");
+}
+
+/* Hand the captured engine log to the app. Returns "" when there is nothing new. */
+JNIEXPORT jstring JNICALL Java_app_remotehub_rdp_NativeRdp_nativeDrainEngineLog(JNIEnv* env,
+                                                                              jclass cls)
+{
+	char joined[RH_LOG_SLOTS * RH_LOG_LINE];
+	size_t used = 0;
+	joined[0] = '\0';
+
+	pthread_mutex_lock(&g_logLock);
+	const int count = g_logCount;
+	const int start = (g_logHead - count + RH_LOG_SLOTS) % RH_LOG_SLOTS;
+	for (int i = 0; i < count; i++)
+	{
+		const char* line = g_engineLog[(start + i) % RH_LOG_SLOTS];
+		size_t len = strlen(line);
+		if (used + len + 2 >= sizeof(joined))
+			break;
+		memcpy(joined + used, line, len);
+		used += len;
+		joined[used++] = '\n';
+		joined[used] = '\0';
+	}
+	g_logCount = 0;
+	g_logHead = 0;
+	pthread_mutex_unlock(&g_logLock);
+
+	return (*env)->NewStringUTF(env, joined);
 }

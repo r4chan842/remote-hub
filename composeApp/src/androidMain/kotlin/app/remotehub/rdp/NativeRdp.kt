@@ -146,6 +146,13 @@ object NativeRdp {
         if (available) nativeSetLogLevel(level)
     }
 
+    /**
+     * FreeRDP's own diagnostics. WinPR writes them to stderr, which an Android app
+     * process does not have, so the bridge captures them and they are drained here
+     * into the app log. Without this a codec or channel failure is invisible.
+     */
+    fun drainEngineLog(): String = if (available) runCatching { nativeDrainEngineLog() }.getOrDefault("") else "" 
+
     @JvmStatic private external fun nativeCreate(listener: RdpListener): Long
     @JvmStatic private external fun nativeConnect(
         handle: Long, host: String, port: Int, username: String, password: String, domain: String,
@@ -172,5 +179,6 @@ object NativeRdp {
     @JvmStatic private external fun nativeDisconnect(handle: Long)
     @JvmStatic private external fun nativeDestroy(handle: Long)
     @JvmStatic private external fun nativeVersion(): String
+    @JvmStatic private external fun nativeDrainEngineLog(): String
     @JvmStatic private external fun nativeSetLogLevel(level: Int)
 }

@@ -42,6 +42,13 @@ class RdpSession(
      */
     private val ready = CompletableDeferred<Unit>()
 
+    /**
+     * "Connected" only means the session was negotiated. This is completed by the
+     * first frame that actually reaches the bitmap, which is the only honest signal
+     * that the user can see something.
+     */
+    private val firstFrame = CompletableDeferred<Unit>()
+
     var trackpadMode: Boolean = false
     var onUpdate: (RemoteMetrics) -> Unit = {}
     var onError: (String) -> Unit = {}
@@ -84,7 +91,7 @@ class RdpSession(
         }
     }
 
-    suspend fun connect() = withContext(Dispatchers.IO) {
+    suspend fun connect(graphicsPipeline: Boolean = true) = withContext(Dispatchers.IO) {
         if (!NativeRdp.available) {
             error("native RDP engine unavailable: ${NativeRdp.failureReason}")
         }
@@ -93,6 +100,7 @@ class RdpSession(
         val forward = node.openRdpForward(connection.address, connection.port)
         forwardPort = forward.substringAfterLast(':').toInt()
         ensureNativePaths()
+        NativeRdp.setLogLevel(2)
         handle = NativeRdp.create(listener)
         if (handle == 0L) error("could not allocate an RDP session")
 
@@ -113,7 +121,7 @@ class RdpSession(
             height = height,
             colorDepth = 24,
             nla = true,
-            graphicsPipeline = true,
+            graphicsPipeline = graphicsPipeline,
             // RemoteFX and planar are decoded inside libfreerdp. H.264 additionally
             // needs the bundled decoder to load, so it is opt-in rather than the
             // only path to a picture.
@@ -138,6 +146,15 @@ class RdpSession(
             error("the desktop did not appear within 75s (the session may still be logging on)")
         }
         Diagnostics.info("rdp", "desktop is live at ${NativeRdp.width(handle)}x${NativeRdp.height(handle)}")
+        // A negotiated session that produces no frames is the white-screen case.
+        // Fail loudly here so the caller can retry on the legacy bitmap path instead
+        // of leaving the user staring at an empty desktop.
+        try {
+            kotlinx.coroutines.withTimeout(15_000) { firstFrame.await() }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            error("no graphics frames arrived (graphicsPipeline=$graphicsPipeline)")
+        }
+        Diagnostics.info("rdp", "first frame rendered")
     }
 
     /**
@@ -199,6 +216,7 @@ class RdpSession(
                         }
                         .getOrDefault(0)
                     if (result == 1) {
+                        if (!firstFrame.isCompleted) firstFrame.complete(Unit)
                         withContext(Dispatchers.Main) { onFrame(target) }
                     }
                     if (failures >= 240) {
@@ -217,6 +235,19 @@ class RdpSession(
         statsJob = scope.launch {
             while (isActive) {
                 delay(1000)
+                // Surface the engine's own diagnostics; a codec or channel failure is
+                // otherwise invisible because WinPR logs to a stderr that does not exist.
+                runCatching { NativeRdp.drainEngineLog() }.getOrDefault("")
+                    .lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .forEach { line ->
+                        when {
+                            line.startsWith("E ") -> Diagnostics.error("rdp-engine", line.drop(2))
+                            line.startsWith("W ") -> Diagnostics.warn("rdp-engine", line.drop(2))
+                            else -> Diagnostics.info("rdp-engine", line.drop(2))
+                        }
+                    }
                 if (handle == 0L) continue
                 val sample = runCatching { collectMetrics(host, port) }
                     .onFailure { Diagnostics.warn("rdp", "metrics sample failed", it) }

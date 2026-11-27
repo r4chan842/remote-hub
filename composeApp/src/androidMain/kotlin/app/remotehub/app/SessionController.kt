@@ -1028,15 +1028,33 @@ class SessionController(
                 fail("rdp", "connection refused: ${connection.address}:${connection.port} is not reachable over the tunnel")
                 return@launch
             }
-            val rdp = RdpSession(context, node, session, store)
-            rdpSessions[serverId] = rdp
-            rdp.trackpadMode = state.trackpadMode
-            rdp.onUpdate = { metrics ->
-                metricsCache[serverId] = metrics
-                publish(state.copy())
+            // Two attempts: the graphics pipeline first, then the legacy bitmap path.
+            // A host that negotiates EGFX but never delivers a surface must not leave
+            // the user with a white desktop.
+            var outcome: Result<Unit> = Result.failure(IllegalStateException("not started"))
+            for (useGraphics in listOf(true, false)) {
+                val rdp = RdpSession(context, node, session, store)
+                rdpSessions[serverId] = rdp
+                rdp.trackpadMode = state.trackpadMode
+                rdp.onUpdate = { metrics ->
+                    metricsCache[serverId] = metrics
+                    publish(state.copy())
+                }
+                rdp.onError = { message -> fail("rdp", message) }
+                outcome = runCatching { rdp.connect(graphicsPipeline = useGraphics) }
+                if (outcome.isSuccess) break
+                val problem = outcome.exceptionOrNull()
+                rdpSessions.remove(serverId)
+                rdp.close()
+                val noFrames = problem?.message?.contains("no graphics frames") == true
+                if (!useGraphics || !noFrames) break
+                Diagnostics.warn(
+                    "rdp",
+                    "the graphics pipeline produced no frames; retrying on the legacy bitmap path",
+                    problem,
+                )
             }
-            rdp.onError = { message -> fail("rdp", message) }
-            runCatching { rdp.connect() }
+            outcome
                 .onSuccess {
                     Diagnostics.info("rdp", "connected to ${session.connection?.address}:${session.connection?.port}")
                     updateServer(serverId) { it.copy(state = ServerState.Connected) }
@@ -1044,8 +1062,7 @@ class SessionController(
                     publish(state.copy(busy = false, remoteConnecting = false))
                 }
                 .onFailure { error ->
-                    rdpSessions.remove(serverId)
-                    rdp.close()
+                    rdpSessions.remove(serverId)?.close()
                     publish(state.copy(remoteConnecting = false))
                     fail("rdp", error.message ?: context.getString(R.string.err_rdp), error)
                 }
