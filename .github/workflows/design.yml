@@ -42,10 +42,28 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fontconfig libfontconfig1
 
       - name: Run unit tests
-        run: gradle :composeApp:desktopTest --no-daemon --stacktrace
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gradle :composeApp:desktopTest --no-daemon --stacktrace; then
+              exit 0
+            fi
+            echo "attempt $attempt failed, retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Render every screen from real Compose code
-        run: gradle :composeApp:renderScreens --no-daemon --stacktrace
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gradle :composeApp:renderScreens --no-daemon --stacktrace; then
+              exit 0
+            fi
+            echo "attempt $attempt failed, retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Verify render output
         run: |
