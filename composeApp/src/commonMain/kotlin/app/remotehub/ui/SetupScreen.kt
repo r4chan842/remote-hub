@@ -1,6 +1,7 @@
 package app.remotehub.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +67,7 @@ fun SetupContent(
     onOpenServer: (String) -> Unit,
     onDisconnectGitHub: () -> Unit,
     onDisconnectNetwork: () -> Unit,
+    onOpenLogs: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val s = LocalStrings.current
@@ -250,7 +253,11 @@ fun SetupContent(
         }
 
         if (state.error != null) {
-            WarningBanner(state.error!!)
+            WarningBanner(state.error!!, Modifier.clickable(onClick = onOpenLogs))
+            TextButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) {
+                Symbol(Symbols.terminal, size = 18.dp)
+                Text("  " + s.viewLogs, style = MaterialTheme.typography.labelLarge)
+            }
         }
 
         NoticeBanner(s.setupRiskNote)

@@ -287,6 +287,63 @@ class AppStrings(
     val version: String = values.getValue("version")
     val seconds: String = values.getValue("seconds")
     val minutes: String = values.getValue("minutes")
+    val logsTitle: String = values.getValue("logsTitle")
+    val logsSubtitle: String = values.getValue("logsSubtitle")
+    val logsEmpty: String = values.getValue("logsEmpty")
+    val logsEmptyHint: String = values.getValue("logsEmptyHint")
+    val logsAll: String = values.getValue("logsAll")
+    val logsErrors: String = values.getValue("logsErrors")
+    val logsWarnings: String = values.getValue("logsWarnings")
+    val logsNetwork: String = values.getValue("logsNetwork")
+    val logsGithub: String = values.getValue("logsGithub")
+    val logsRdp: String = values.getValue("logsRdp")
+    val logsSystem: String = values.getValue("logsSystem")
+    val logsCopy: String = values.getValue("logsCopy")
+    val logsCopied: String = values.getValue("logsCopied")
+    val logsClear: String = values.getValue("logsClear")
+    val logsCleared: String = values.getValue("logsCleared")
+    val logsShare: String = values.getValue("logsShare")
+    val logsSearchHint: String = values.getValue("logsSearchHint")
+    val logsDetail: String = values.getValue("logsDetail")
+    val logsEnvironment: String = values.getValue("logsEnvironment")
+    val logsCountLabel: String = values.getValue("logsCountLabel")
+    val viewLogs: String = values.getValue("viewLogs")
+    val diagnosticsSection: String = values.getValue("diagnosticsSection")
+    val diagnosticsHint: String = values.getValue("diagnosticsHint")
+    val lastCrashTitle: String = values.getValue("lastCrashTitle")
+    val lastCrashHint: String = values.getValue("lastCrashHint")
+    val logsLiveOn: String = values.getValue("logsLiveOn")
+    val logsExpandAll: String = values.getValue("logsExpandAll")
+    val errNetlinkTitle: String = values.getValue("errNetlinkTitle")
+    val errNetlinkHint: String = values.getValue("errNetlinkHint")
+    val errLogDirTitle: String = values.getValue("errLogDirTitle")
+    val errLogDirHint: String = values.getValue("errLogDirHint")
+    val errPanicTitle: String = values.getValue("errPanicTitle")
+    val errPanicHint: String = values.getValue("errPanicHint")
+    val errAuthKeyTitle: String = values.getValue("errAuthKeyTitle")
+    val errAuthKeyHint: String = values.getValue("errAuthKeyHint")
+    val errKeyExpiredTitle: String = values.getValue("errKeyExpiredTitle")
+    val errKeyExpiredHint: String = values.getValue("errKeyExpiredHint")
+    val errOfflineTitle: String = values.getValue("errOfflineTitle")
+    val errOfflineHint: String = values.getValue("errOfflineHint")
+    val errTimeoutTitle: String = values.getValue("errTimeoutTitle")
+    val errTimeoutHint: String = values.getValue("errTimeoutHint")
+    val errTlsTitle: String = values.getValue("errTlsTitle")
+    val errTlsHint: String = values.getValue("errTlsHint")
+    val errRefusedTitle: String = values.getValue("errRefusedTitle")
+    val errRefusedHint: String = values.getValue("errRefusedHint")
+    val errGithubAuthTitle: String = values.getValue("errGithubAuthTitle")
+    val errGithubAuthHint: String = values.getValue("errGithubAuthHint")
+    val errGithubScopeTitle: String = values.getValue("errGithubScopeTitle")
+    val errGithubScopeHint: String = values.getValue("errGithubScopeHint")
+    val errGithubRateTitle: String = values.getValue("errGithubRateTitle")
+    val errGithubRateHint: String = values.getValue("errGithubRateHint")
+    val errStorageTitle: String = values.getValue("errStorageTitle")
+    val errStorageHint: String = values.getValue("errStorageHint")
+    val errRdpTitle: String = values.getValue("errRdpTitle")
+    val errRdpHint: String = values.getValue("errRdpHint")
+    val errGenericTitle: String = values.getValue("errGenericTitle")
+    val errGenericHint: String = values.getValue("errGenericHint")
 }
 
 /** Every key a locale must provide. */
@@ -336,9 +393,78 @@ val requiredKeys: List<String> = listOf(
     "themeLight", "themeDark", "languageLabel", "notifications", "expiryAlert", "alertThreshold",
     "security", "biometricLock", "clearCredentials", "storageEncryption", "guides", "gettingStarted",
     "troubleshooting", "policyAndLimits", "about", "version", "seconds", "minutes",
+    "logsTitle", "logsSubtitle", "logsEmpty", "logsEmptyHint", "logsAll",
+    "logsErrors", "logsWarnings", "logsNetwork", "logsGithub", "logsRdp",
+    "logsSystem", "logsCopy", "logsCopied", "logsClear", "logsCleared",
+    "logsShare", "logsSearchHint", "logsDetail", "logsEnvironment", "logsCountLabel",
+    "viewLogs", "diagnosticsSection", "diagnosticsHint", "lastCrashTitle", "lastCrashHint",
+    "logsLiveOn", "logsExpandAll", "errNetlinkTitle", "errNetlinkHint", "errLogDirTitle",
+    "errLogDirHint", "errPanicTitle", "errPanicHint", "errAuthKeyTitle", "errAuthKeyHint",
+    "errKeyExpiredTitle", "errKeyExpiredHint", "errOfflineTitle", "errOfflineHint", "errTimeoutTitle",
+    "errTimeoutHint", "errTlsTitle", "errTlsHint", "errRefusedTitle", "errRefusedHint",
+    "errGithubAuthTitle", "errGithubAuthHint", "errGithubScopeTitle", "errGithubScopeHint", "errGithubRateTitle",
+    "errGithubRateHint", "errStorageTitle", "errStorageHint", "errRdpTitle", "errRdpHint",
+    "errGenericTitle", "errGenericHint",
 )
 
 val Persian = AppStrings("fa", true, mapOf(
+    "logsTitle" to "لاگ‌ها",
+    "logsSubtitle" to "هرچه در برنامه رخ داده، با زمان دقیق",
+    "logsEmpty" to "هنوز لاگی ثبت نشده",
+    "logsEmptyHint" to "با هر تلاش اتصال، اینجا پر می‌شود.",
+    "logsAll" to "همه",
+    "logsErrors" to "خطاها",
+    "logsWarnings" to "هشدارها",
+    "logsNetwork" to "شبکه",
+    "logsGithub" to "گیت‌هاب",
+    "logsRdp" to "دسکتاپ",
+    "logsSystem" to "سیستم",
+    "logsCopy" to "کپی لاگ",
+    "logsCopied" to "لاگ کپی شد",
+    "logsClear" to "پاک کردن",
+    "logsCleared" to "لاگ پاک شد",
+    "logsShare" to "خروجی گرفتن",
+    "logsSearchHint" to "جست‌وجو در لاگ",
+    "logsDetail" to "جزئیات فنی",
+    "logsEnvironment" to "وضعیت محیط",
+    "logsCountLabel" to "ردیف",
+    "viewLogs" to "دیدن لاگ",
+    "diagnosticsSection" to "لاگ و عیب‌یابی",
+    "diagnosticsHint" to "اگر چیزی کار نکرد، متن دقیق خطا اینجاست.",
+    "lastCrashTitle" to "اجرای قبلی ناخواسته بسته شد",
+    "lastCrashHint" to "دلیل ثبت‌شده در لاگ‌ها آمده است.",
+    "logsLiveOn" to "به‌روزرسانی زنده",
+    "logsExpandAll" to "نمایش جزئیات",
+    "errNetlinkTitle" to "اندروید اجازهٔ خواندن کارت شبکه را نداد",
+    "errNetlinkHint" to "نسخهٔ جدید از مسیر مجاز استفاده می‌کند؛ برنامه را ببندید و دوباره باز کنید.",
+    "errLogDirTitle" to "مسیر قابل‌نوشتن برای فایل‌های Tailscale پیدا نشد",
+    "errLogDirHint" to "حافظهٔ برنامه پر یا محدود است؛ فضای خالی کنید و دوباره تلاش کنید.",
+    "errPanicTitle" to "موتور شبکه خطای داخلی داد",
+    "errPanicHint" to "برنامه بسته نشد؛ متن کامل خطا در لاگ‌ها است. آن را کپی کنید و دوباره تلاش کنید.",
+    "errAuthKeyTitle" to "کلید Tailscale پذیرفته نشد",
+    "errAuthKeyHint" to "کلید باید tskey-auth باشد، منقضی نشده و یک‌بارمصرفِ استفاده‌نشده باشد؛ کلید تازه بسازید.",
+    "errKeyExpiredTitle" to "کلید Tailscale منقضی شده است",
+    "errKeyExpiredHint" to "در پنل Keys کلیدی با اعتبار حداقل ۹۰ روز و گزینهٔ Reusable بسازید.",
+    "errOfflineTitle" to "اتصال اینترنت یا DNS کار نمی‌کند",
+    "errOfflineHint" to "شبکهٔ گوشی را بررسی کنید؛ فیلترشکن روشن مانع اتصال می‌شود.",
+    "errTimeoutTitle" to "اتصال در زمان مقرر کامل نشد",
+    "errTimeoutHint" to "معمولاً کلید نامعتبر یا شبکهٔ کند است؛ لاگ مرحلهٔ آخر را ببینید و دوباره تلاش کنید.",
+    "errTlsTitle" to "گواهی امنیتی تأیید نشد",
+    "errTlsHint" to "تاریخ و ساعت گوشی را روی حالت خودکار بگذارید و شبکه را عوض کنید.",
+    "errRefusedTitle" to "سرور به درخواست اتصال پاسخ نداد",
+    "errRefusedHint" to "ویندوز هنوز بالا نیامده یا RDP آماده نیست؛ چند دقیقه بعد دوباره تلاش کنید.",
+    "errGithubAuthTitle" to "توکن گیت‌هاب معتبر نیست",
+    "errGithubAuthHint" to "توکن را دوباره بسازید؛ ممکن است پاک یا منقضی شده باشد.",
+    "errGithubScopeTitle" to "توکن مجوز کافی ندارد",
+    "errGithubScopeHint" to "مجوزهای repo و workflow لازم است؛ از لینک آمادهٔ برنامه توکن تازه بسازید.",
+    "errGithubRateTitle" to "گیت‌هاب موقتاً درخواست‌ها را محدود کرد",
+    "errGithubRateHint" to "یک دقیقه صبر کنید و دوباره تلاش کنید.",
+    "errStorageTitle" to "ذخیره‌سازی امن برنامه در دسترس نیست",
+    "errStorageHint" to "فضای خالی کنید یا یک‌بار برنامه را ببندید و باز کنید.",
+    "errRdpTitle" to "اتصال دسکتاپ برقرار نشد",
+    "errRdpHint" to "آدرس و رمز را دوباره بررسی کنید؛ اگر سرور دوباره ساخته شده، رمز عوض شده است.",
+    "errGenericTitle" to "عملیات ناموفق بود",
+    "errGenericHint" to "متن دقیق خطا در لاگ‌ها ثبت شده است.",
     "appName" to "RemoteHub",
     "navDashboard" to "داشبورد",
     "navServers" to "سرورها",
@@ -612,6 +738,63 @@ val Persian = AppStrings("fa", true, mapOf(
 ))
 
 val English = AppStrings("en", false, mapOf(
+    "logsTitle" to "Logs",
+    "logsSubtitle" to "Everything the app did, with exact times",
+    "logsEmpty" to "No log entries yet",
+    "logsEmptyHint" to "Every connection attempt fills this list.",
+    "logsAll" to "All",
+    "logsErrors" to "Errors",
+    "logsWarnings" to "Warnings",
+    "logsNetwork" to "Network",
+    "logsGithub" to "GitHub",
+    "logsRdp" to "Desktop",
+    "logsSystem" to "System",
+    "logsCopy" to "Copy log",
+    "logsCopied" to "Log copied",
+    "logsClear" to "Clear",
+    "logsCleared" to "Log cleared",
+    "logsShare" to "Export",
+    "logsSearchHint" to "Search the log",
+    "logsDetail" to "Technical detail",
+    "logsEnvironment" to "Environment",
+    "logsCountLabel" to "entries",
+    "viewLogs" to "View log",
+    "diagnosticsSection" to "Logs & diagnostics",
+    "diagnosticsHint" to "If something fails, the exact error text is here.",
+    "lastCrashTitle" to "The previous run ended unexpectedly",
+    "lastCrashHint" to "The recorded reason is in the logs.",
+    "logsLiveOn" to "Live updates",
+    "logsExpandAll" to "Show details",
+    "errNetlinkTitle" to "Android refused to read the network interfaces",
+    "errNetlinkHint" to "The new build uses the permitted path; close the app and open it again.",
+    "errLogDirTitle" to "No writable folder was found for Tailscale files",
+    "errLogDirHint" to "App storage is full or restricted; free some space and retry.",
+    "errPanicTitle" to "The network engine hit an internal error",
+    "errPanicHint" to "The app stayed alive; the full text is in the logs. Copy it and retry.",
+    "errAuthKeyTitle" to "The Tailscale key was rejected",
+    "errAuthKeyHint" to "It must be a fresh, unexpired tskey-auth key; create a new one.",
+    "errKeyExpiredTitle" to "The Tailscale key has expired",
+    "errKeyExpiredHint" to "In the Keys panel create a Reusable key valid for at least 90 days.",
+    "errOfflineTitle" to "Internet or DNS is not working",
+    "errOfflineHint" to "Check the phone's network; another VPN can block the tunnel.",
+    "errTimeoutTitle" to "The connection did not finish in time",
+    "errTimeoutHint" to "Usually an invalid key or a slow network; check the last stage in the log and retry.",
+    "errTlsTitle" to "The security certificate was not trusted",
+    "errTlsHint" to "Set the phone's date to automatic and try another network.",
+    "errRefusedTitle" to "The server refused the connection",
+    "errRefusedHint" to "Windows is still booting or RDP is not ready; retry in a few minutes.",
+    "errGithubAuthTitle" to "The GitHub token is not valid",
+    "errGithubAuthHint" to "Create the token again; it may be revoked or expired.",
+    "errGithubScopeTitle" to "The token lacks the required permissions",
+    "errGithubScopeHint" to "repo and workflow are required; use the app's prefilled link to make a new token.",
+    "errGithubRateTitle" to "GitHub temporarily limited the requests",
+    "errGithubRateHint" to "Wait a minute and retry.",
+    "errStorageTitle" to "The app's secure storage is unavailable",
+    "errStorageHint" to "Free space, or close and reopen the app once.",
+    "errRdpTitle" to "The desktop connection failed",
+    "errRdpHint" to "Recheck the address and password; a rebuilt server has a new password.",
+    "errGenericTitle" to "The operation failed",
+    "errGenericHint" to "The exact error text is recorded in the logs.",
     "appName" to "RemoteHub",
     "navDashboard" to "Dashboard",
     "navServers" to "Servers",
@@ -885,6 +1068,63 @@ val English = AppStrings("en", false, mapOf(
 ))
 
 val Arabic = AppStrings("ar", true, mapOf(
+    "logsTitle" to "السجلات",
+    "logsSubtitle" to "كل ما حدث في التطبيق مع الوقت الدقيق",
+    "logsEmpty" to "لا توجد سجلات بعد",
+    "logsEmptyHint" to "كل محاولة اتصال تملأ هذه القائمة.",
+    "logsAll" to "الكل",
+    "logsErrors" to "الأخطاء",
+    "logsWarnings" to "التحذيرات",
+    "logsNetwork" to "الشبكة",
+    "logsGithub" to "GitHub",
+    "logsRdp" to "سطح المكتب",
+    "logsSystem" to "النظام",
+    "logsCopy" to "نسخ السجل",
+    "logsCopied" to "تم نسخ السجل",
+    "logsClear" to "مسح",
+    "logsCleared" to "تم مسح السجل",
+    "logsShare" to "تصدير",
+    "logsSearchHint" to "ابحث في السجل",
+    "logsDetail" to "التفاصيل التقنية",
+    "logsEnvironment" to "البيئة",
+    "logsCountLabel" to "سطر",
+    "viewLogs" to "عرض السجل",
+    "diagnosticsSection" to "السجلات والتشخيص",
+    "diagnosticsHint" to "إذا فشل شيء، ستجد نص الخطأ الدقيق هنا.",
+    "lastCrashTitle" to "أُغلق التشغيل السابق بشكل غير متوقع",
+    "lastCrashHint" to "السبب المسجّل موجود في السجلات.",
+    "logsLiveOn" to "تحديث مباشر",
+    "logsExpandAll" to "إظهار التفاصيل",
+    "errNetlinkTitle" to "رفض أندرويد قراءة واجهات الشبكة",
+    "errNetlinkHint" to "يستخدم الإصدار الجديد المسار المسموح؛ أغلق التطبيق وافتحه مجددًا.",
+    "errLogDirTitle" to "لم يتم العثور على مجلد قابل للكتابة لملفات Tailscale",
+    "errLogDirHint" to "مساحة التطبيق ممتلئة أو مقيّدة؛ حرّر مساحة وأعد المحاولة.",
+    "errPanicTitle" to "حدث خطأ داخلي في محرك الشبكة",
+    "errPanicHint" to "لم يُغلق التطبيق؛ النص الكامل في السجلات. انسخه وأعد المحاولة.",
+    "errAuthKeyTitle" to "لم يتم قبول مفتاح Tailscale",
+    "errAuthKeyHint" to "يجب أن يكون مفتاح tskey-auth جديدًا وغير منتهٍ؛ أنشئ مفتاحًا جديدًا.",
+    "errKeyExpiredTitle" to "انتهت صلاحية مفتاح Tailscale",
+    "errKeyExpiredHint" to "أنشئ مفتاحًا قابلًا لإعادة الاستخدام لمدة ٩٠ يومًا على الأقل.",
+    "errOfflineTitle" to "الإنترنت أو DNS لا يعمل",
+    "errOfflineHint" to "تحقق من شبكة الهاتف؛ قد يمنع VPN آخر الاتصال.",
+    "errTimeoutTitle" to "لم يكتمل الاتصال في الوقت المحدد",
+    "errTimeoutHint" to "عادةً مفتاح غير صالح أو شبكة بطيئة؛ راجع آخر مرحلة في السجل وأعد المحاولة.",
+    "errTlsTitle" to "لم يتم التحقق من الشهادة الأمنية",
+    "errTlsHint" to "اضبط تاريخ الهاتف تلقائيًا وجرّب شبكة أخرى.",
+    "errRefusedTitle" to "رفض الخادم الاتصال",
+    "errRefusedHint" to "ما زال ويندوز يقلع أو RDP غير جاهز؛ أعد المحاولة بعد دقائق.",
+    "errGithubAuthTitle" to "رمز GitHub غير صالح",
+    "errGithubAuthHint" to "أنشئ الرمز مجددًا؛ ربما أُلغي أو انتهت صلاحيته.",
+    "errGithubScopeTitle" to "الرمز لا يملك الصلاحيات المطلوبة",
+    "errGithubScopeHint" to "مطلوب صلاحيتا repo وworkflow؛ استخدم الرابط الجاهز لإنشاء رمز جديد.",
+    "errGithubRateTitle" to "قيّد GitHub الطلبات مؤقتًا",
+    "errGithubRateHint" to "انتظر دقيقة وأعد المحاولة.",
+    "errStorageTitle" to "التخزين الآمن للتطبيق غير متاح",
+    "errStorageHint" to "حرّر مساحة أو أغلق التطبيق وافتحه مرة أخرى.",
+    "errRdpTitle" to "فشل الاتصال بسطح المكتب",
+    "errRdpHint" to "تحقق من العنوان وكلمة المرور؛ للخادم المعاد إنشاؤه كلمة مرور جديدة.",
+    "errGenericTitle" to "فشلت العملية",
+    "errGenericHint" to "تم تسجيل نص الخطأ الدقيق في السجلات.",
     "appName" to "RemoteHub",
     "navDashboard" to "لوحة التحكم",
     "navServers" to "الخوادم",

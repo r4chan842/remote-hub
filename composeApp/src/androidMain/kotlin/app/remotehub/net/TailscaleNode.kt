@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import app.remotehub.app.LogLevel
+import app.remotehub.diag.Diagnostics
 import app.remotehub.platform.AndroidEnv
 import app.remotehub.tsbridge.Node
 import app.remotehub.tsbridge.Tsbridge
@@ -29,6 +31,7 @@ data class NodeStatus(
     val ipv6: String = "",
     val authUrl: String = "",
     val error: String = "",
+    val stage: String = "",
     val health: List<String> = emptyList(),
     val peerCount: Int = 0,
     val online: Boolean = false,
@@ -81,25 +84,37 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
         ephemeral: Boolean = true,
     ): NodeStatus = withContext(Dispatchers.IO) {
         stop()
-        val created = Tsbridge.newNode(stateDir(hostname), hostname, authKey, ephemeral)
+        Diagnostics.info("network", "starting tailscale node hostname=$hostname ephemeral=$ephemeral")
+        val created = runCatching { Tsbridge.newNode(stateDir(hostname), hostname, authKey, ephemeral) }
+            .getOrElse { failure ->
+                Diagnostics.error("network", "native node could not be created", failure)
+                return@withContext NodeStatus(error = failure.message ?: "native bridge unavailable", stage = "create")
+            }
         synchronized(gate) { node = created }
-        created.startAsync()
-        val up = runCatching { created.awaitRunning(90_000) }.getOrDefault(false)
+        runCatching { created.startAsync() }
+            .onFailure { Diagnostics.error("network", "start call failed", it) }
+        val up = runCatching { created.awaitRunning(90_000) }
+            .onFailure { Diagnostics.error("network", "awaitRunning failed", it) }
+            .getOrDefault(false)
+        // The Go side has the real reason; pull it before deciding what to show.
+        Diagnostics.pullNative()
         val current = status()
         if (up && current.running) {
             // Only a fully started node may be touched by the connectivity callbacks.
             registerNetworkCallback()
+            Diagnostics.info("network", "tailnet online ip=${current.ipv4} peers=${current.peerCount} relay=${current.relay}")
             current
         } else {
             // Leave nothing half-initialised behind: a failed start must not keep a
             // node object that later JNI calls could dereference.
-            val failed = if (current.error.isBlank()) {
-                current.copy(error = "tailscale did not reach the Running state")
-            } else {
-                current
-            }
+            val reason = current.error.ifBlank { "tailscale did not reach the Running state" }
+            Diagnostics.log(
+                LogLevel.Error, "network",
+                "tailscale start failed at stage=${current.stage.ifBlank { "unknown" }}: $reason",
+                detail = current.logs.takeLast(12).joinToString("\n"),
+            )
             stop()
-            failed
+            current.copy(error = reason)
         }
     }
 
@@ -107,8 +122,14 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
 
     fun status(): NodeStatus {
         val current = snapshot() ?: return NodeStatus()
-        return runCatching { json.decodeFromString(NodeStatus.serializer(), current.statusJSON()) }
-            .getOrElse { NodeStatus(error = it.message ?: "status decode failed") }
+        val raw = runCatching { current.statusJSON() }
+            .onFailure { Diagnostics.error("network", "statusJSON call failed", it) }
+            .getOrElse { return NodeStatus(error = it.message ?: "status call failed", stage = "status") }
+        return runCatching { json.decodeFromString(NodeStatus.serializer(), raw) }
+            .getOrElse { failure ->
+                Diagnostics.log(LogLevel.Error, "network", "status decode failed", detail = raw.take(2000))
+                NodeStatus(error = failure.message ?: "status decode failed", stage = "decode")
+            }
     }
 
     fun peers(): List<TailnetPeer> {
@@ -126,6 +147,7 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
         val current = snapshot() ?: error("tailscale node is not running")
         val address = current.openForward("127.0.0.1:0", "$target:$port")
         forwardAddress = address
+        Diagnostics.info("forward", "rdp forward $address -> $target:$port")
         address
     }
 
@@ -134,7 +156,9 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
     suspend fun probe(host: String, port: Int, timeoutMillis: Int = 6000): Boolean =
         withContext(Dispatchers.IO) {
             val current = snapshot() ?: return@withContext false
-            runCatching { current.probe("$host:$port", timeoutMillis.toLong()) }.isSuccess
+            runCatching { current.probe("$host:$port", timeoutMillis.toLong()) }
+                .onFailure { Diagnostics.warn("probe", "$host:$port unreachable", it) }
+                .isSuccess
         }
 
     suspend fun latency(host: String, port: Int, timeoutMillis: Int = 6000): Int =
@@ -146,7 +170,12 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
         pollJob?.cancel()
         pollJob = scope.launch {
             while (isActive) {
-                onStatus(status())
+                Diagnostics.pullNative()
+                val current = status()
+                if (current.error.isNotBlank()) {
+                    Diagnostics.warn("network", "status reports: ${current.error}")
+                }
+                onStatus(current)
                 delay(intervalMillis)
             }
         }
@@ -197,6 +226,9 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
         forwardAddress?.let { address -> runCatching { current?.closeForward(address) } }
         forwardAddress = null
         runCatching { current?.stop() }
+            .onFailure { Diagnostics.error("network", "stop failed", it) }
+        Diagnostics.info("network", "tailscale node stopped")
+        Diagnostics.pullNative()
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {

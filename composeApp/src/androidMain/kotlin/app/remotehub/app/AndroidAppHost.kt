@@ -3,6 +3,7 @@ package app.remotehub.app
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -28,8 +29,10 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import app.remotehub.MainActivity
 import app.remotehub.data.SecureStore
+import app.remotehub.diag.Diagnostics
 import app.remotehub.data.createSecretBox
 import app.remotehub.data.createSecureStore
 import app.remotehub.design.RemoteHubTheme
@@ -45,11 +48,13 @@ import app.remotehub.ui.CreateContent
 import app.remotehub.ui.FindingAddressContent
 import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
+import app.remotehub.ui.LogsContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
 import app.remotehub.ui.SessionDetailContent
 import app.remotehub.ui.SettingsContent
 import app.remotehub.ui.SetupContent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,7 +70,12 @@ import kotlinx.coroutines.launch
  * beside that path and never interrupt it.
  */
 class AndroidAppHost(private val activity: ComponentActivity) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // An unhandled failure in a background job is recorded and shown, never fatal.
+    private val failures = CoroutineExceptionHandler { _, error ->
+        Diagnostics.error("app", "background task failed: ${error.message ?: error.javaClass.simpleName}", error)
+        state = state.copy(busy = false, error = error.message ?: "background task failed")
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + failures)
     private val store: SecureStore = createSecureStore()
     private val secretBox = createSecretBox()
     private val controller = SessionController(activity, store, secretBox, scope)
@@ -90,7 +100,17 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                 state = state.copy(toast = effect.label)
             }
             is SideEffect.Notify -> controller.postAlert(effect.title, effect.body)
-            is SideEffect.ShareFile -> Unit
+            is SideEffect.ShareFile -> {
+                runCatching {
+                    val file = java.io.File(effect.path)
+                    val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.logs", file)
+                    val send = Intent(Intent.ACTION_SEND)
+                        .setType(effect.mimeType)
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    activity.startActivity(Intent.createChooser(send, effect.path.substringAfterLast('/')))
+                }.onFailure { Diagnostics.error("app", "sharing the log failed", it) }
+            }
         }
     }
 
@@ -203,6 +223,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     AppScreen.Detail -> active?.name ?: strings.sessionDetail
                     AppScreen.Settings -> strings.settingsTitle
                     AppScreen.Guide -> strings.guides
+                    AppScreen.Logs -> strings.logsTitle
                     AppScreen.Remote -> strings.remoteDesktop
                 }
                 val subtitle = when (state.screen) {
@@ -217,6 +238,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     AppScreen.Detail -> { { BackIcon(onClick = { controller.goSetup() }) } }
                     AppScreen.Settings -> { { BackIcon(onClick = { controller.goSetup() }) } }
                     AppScreen.Guide -> { { BackIcon(onClick = { controller.closeGuide() }) } }
+                    AppScreen.Logs -> { { BackIcon(onClick = { controller.closeLogs() }) } }
                     else -> null
                 }
 
@@ -224,6 +246,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     AppScreen.Create -> BackHandler { controller.goSetup() }
                     AppScreen.Detail, AppScreen.Settings -> BackHandler { controller.goSetup() }
                     AppScreen.Guide -> BackHandler { controller.closeGuide() }
+                    AppScreen.Logs -> BackHandler { controller.closeLogs() }
                     else -> Unit
                 }
 
@@ -260,6 +283,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             onOpenServer = { controller.openServer(it) },
                             onDisconnectGitHub = { controller.disconnectGitHub() },
                             onDisconnectNetwork = { controller.disconnectNetwork() },
+                            onOpenLogs = { controller.openLogs("error") },
                             modifier = content,
                         )
 
@@ -307,11 +331,30 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             onExpiryAlert = { controller.setExpiryAlert(it) },
                             onWarningMinutes = { controller.setWarningMinutes(it) },
                             onGuide = { controller.openGuide(it) },
+                            onLogs = { controller.openLogs() },
                             modifier = content,
                         )
 
                         AppScreen.Guide -> GuideContent(
                             guideId = state.guideId ?: "github",
+                            modifier = content,
+                        )
+
+                        AppScreen.Logs -> LogsContent(
+                            entries = state.logs,
+                            filter = state.logFilter,
+                            query = state.logQuery,
+                            expandedSeq = state.expandedLogSeq,
+                            crashNotice = state.crashNotice,
+                            environment = state.environmentReport,
+                            onFilter = { controller.setLogFilter(it) },
+                            onQuery = { controller.setLogQuery(it) },
+                            onToggleDetail = { controller.toggleLogDetail(it) },
+                            onCopy = { controller.copyLogs() },
+                            onShare = { controller.shareLogs() },
+                            onClear = { controller.clearLogs() },
+                            onRefresh = { controller.refreshLogs() },
+                            onDismissCrash = { controller.dismissCrashNotice() },
                             modifier = content,
                         )
 
@@ -326,6 +369,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             onOpenServer = { controller.openServer(it) },
                             onDisconnectGitHub = { controller.disconnectGitHub() },
                             onDisconnectNetwork = { controller.disconnectNetwork() },
+                            onOpenLogs = { controller.openLogs("error") },
                             modifier = content,
                         )
                     }

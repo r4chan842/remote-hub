@@ -3,12 +3,15 @@ package app.remotehub
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import app.remotehub.diag.Diagnostics
 import app.remotehub.platform.AndroidEnv
 
 class RemoteHubApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AndroidEnv.init(this)
+        // First, before anything can fail: the log must exist to record the failure.
+        Diagnostics.install(this)
         val manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             SESSION_CHANNEL,

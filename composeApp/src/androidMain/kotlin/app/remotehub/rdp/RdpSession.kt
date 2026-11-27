@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import app.remotehub.data.SecureStore
 import app.remotehub.domain.ServerSession
+import app.remotehub.diag.Diagnostics
 import app.remotehub.net.TailscaleNode
 import app.remotehub.ui.RemoteMetrics
 import kotlinx.coroutines.CoroutineScope
@@ -40,11 +41,12 @@ class RdpSession(
 
     private val listener = object : RdpListener {
         override fun onState(state: Int, message: String) {
+            Diagnostics.info("rdp", "engine state=$state ${message}".trim())
             when (state) {
                 NativeRdp.STATE_FAILED -> onError(message)
                 NativeRdp.STATE_CERT_CHANGED -> onError("host certificate changed: $message")
                 NativeRdp.STATE_CONNECTED -> {
-                    fingerprint = NativeRdp.fingerprint(handle)
+                    fingerprint = runCatching { NativeRdp.fingerprint(handle) }.getOrDefault("")
                     if (fingerprint.isNotBlank()) {
                         store.put("$FINGERPRINT_PREFIX${server.id}", fingerprint)
                     }
@@ -69,6 +71,7 @@ class RdpSession(
             error("native RDP engine unavailable: ${NativeRdp.failureReason}")
         }
         val connection = server.connection ?: error("no connection details")
+        Diagnostics.info("rdp", "opening tunnel to ${connection.address}:${connection.port} as ${connection.username}")
         val forward = node.openRdpForward(connection.address, connection.port)
         forwardPort = forward.substringAfterLast(':').toInt()
         handle = NativeRdp.create(listener)
@@ -98,7 +101,10 @@ class RdpSession(
             pinnedFingerprint = pinned,
             quality = 1,
         )
-        if (!ok) error("RDP connect call failed")
+        if (!ok) {
+            Diagnostics.error("rdp", "FreeRDP refused the connection to 127.0.0.1:$forwardPort (nla=true, pinned=${pinned.isNotBlank()})")
+            error("RDP connect call failed")
+        }
 
         startPump()
         startStats(connection.address, connection.port)
@@ -117,12 +123,26 @@ class RdpSession(
     private fun startPump() {
         pumpJob?.cancel()
         pumpJob = scope.launch {
+            var failures = 0
             while (isActive) {
                 val target = bitmap
                 if (target != null && handle != 0L) {
-                    val result = NativeRdp.render(handle, target)
+                    // A render failure must not spin silently or take the app down.
+                    val result = runCatching { NativeRdp.render(handle, target) }
+                        .onFailure { failure ->
+                            failures += 1
+                            if (failures == 1 || failures % 60 == 0) {
+                                Diagnostics.warn("rdp", "frame render failed ($failures)", failure)
+                            }
+                        }
+                        .getOrDefault(0)
                     if (result == 1) {
                         withContext(Dispatchers.Main) { onFrame(target) }
+                    }
+                    if (failures >= 240) {
+                        Diagnostics.error("rdp", "stopping the frame pump after repeated render failures")
+                        withContext(Dispatchers.Main) { onError("RDP frame rendering failed repeatedly") }
+                        return@launch
                     }
                 }
                 delay(16)
@@ -136,32 +156,35 @@ class RdpSession(
             while (isActive) {
                 delay(1000)
                 if (handle == 0L) continue
-                val frames = NativeRdp.frames(handle)
-                val now = System.currentTimeMillis()
-                val elapsed = if (lastSampleAt == 0L) 1000 else now - lastSampleAt
-                val fps = if (elapsed > 0) ((frames - lastFrames) * 1000 / elapsed).toInt() else 0
-                lastFrames = frames
-                lastSampleAt = now
-                val width = NativeRdp.width(handle)
-                val height = NativeRdp.height(handle)
-                val latency = node.latency(host, port, 3000)
-                val bytes = width.toLong() * height * 4 * fps
-                val kbps = if (bytes > 0) (bytes * 8 / 1000).toInt() else 0
-                lastBytes = bytes
-                withContext(Dispatchers.Main) {
-                    onUpdate(
-                        RemoteMetrics(
-                            latencyMillis = if (latency < 0) 0 else latency,
-                            framesPerSecond = fps,
-                            kilobitsPerSecond = kbps,
-                            resolutionLabel = if (width > 0) "${width}x$height" else "—",
-                            trackpadMode = trackpadMode,
-                            connecting = !NativeRdp.connected(handle),
-                        ),
-                    )
-                }
+                val sample = runCatching { collectMetrics(host, port) }
+                    .onFailure { Diagnostics.warn("rdp", "metrics sample failed", it) }
+                    .getOrNull() ?: continue
+                withContext(Dispatchers.Main) { onUpdate(sample) }
             }
         }
+    }
+
+    private suspend fun collectMetrics(host: String, port: Int): RemoteMetrics {
+        val frames = NativeRdp.frames(handle)
+        val now = System.currentTimeMillis()
+        val elapsed = if (lastSampleAt == 0L) 1000 else now - lastSampleAt
+        val fps = if (elapsed > 0) ((frames - lastFrames) * 1000 / elapsed).toInt() else 0
+        lastFrames = frames
+        lastSampleAt = now
+        val width = NativeRdp.width(handle)
+        val height = NativeRdp.height(handle)
+        val latency = node.latency(host, port, 3000)
+        val bytes = width.toLong() * height * 4 * fps
+        val kbps = if (bytes > 0) (bytes * 8 / 1000).toInt() else 0
+        lastBytes = bytes
+        return RemoteMetrics(
+        latencyMillis = if (latency < 0) 0 else latency,
+        framesPerSecond = fps,
+        kilobitsPerSecond = kbps,
+        resolutionLabel = if (width > 0) "${width}x$height" else "—",
+        trackpadMode = trackpadMode,
+        connecting = !NativeRdp.connected(handle),
+        )
     }
 
     fun metrics(): RemoteMetrics = RemoteMetrics(
@@ -174,24 +197,24 @@ class RdpSession(
     )
 
     fun sendPointer(flags: Int, x: Int, y: Int) {
-        NativeRdp.mouse(handle, flags, x, y)
+        runCatching { NativeRdp.mouse(handle, flags, x, y) }
     }
 
     fun sendWheel(delta: Int, x: Int, y: Int) {
-        NativeRdp.wheel(handle, NativeRdp.PTR_WHEEL or delta, x, y)
+        runCatching { NativeRdp.wheel(handle, NativeRdp.PTR_WHEEL or delta, x, y) }
     }
 
     fun sendTouch(flags: Int, finger: Int, x: Int, y: Int) {
-        NativeRdp.touch(handle, flags, finger, 0, x, y)
+        runCatching { NativeRdp.touch(handle, flags, finger, 0, x, y) }
     }
 
-    fun sendKey(scancode: Int, down: Boolean) = NativeRdp.key(handle, scancode, down)
+    fun sendKey(scancode: Int, down: Boolean) = runCatching { NativeRdp.key(handle, scancode, down) }.isSuccess
 
     fun sendText(text: String) {
-        text.forEach { NativeRdp.unicode(handle, it.code) }
+        text.forEach { code -> runCatching { NativeRdp.unicode(handle, code.code) } }
     }
 
-    fun sendCtrlAltDel() {
+    fun sendCtrlAltDel() = runCatching {
         NativeRdp.key(handle, 0x1D, true)
         NativeRdp.key(handle, 0x38, true)
         NativeRdp.key(handle, 0x153, true)
@@ -200,7 +223,7 @@ class RdpSession(
         NativeRdp.key(handle, 0x1D, false)
     }
 
-    fun sendClipboard(text: String): Boolean = NativeRdp.sendClipboard(handle, text)
+    fun sendClipboard(text: String): Boolean = runCatching { NativeRdp.sendClipboard(handle, text) }.getOrDefault(false)
 
     fun resize(width: Int, height: Int): Boolean {
         NativeRdp.allocFrame(handle, width, height)
@@ -216,11 +239,12 @@ class RdpSession(
         pumpJob?.cancel()
         statsJob?.cancel()
         if (handle != 0L) {
-            NativeRdp.disconnect(handle)
-            NativeRdp.destroy(handle)
+            Diagnostics.info("rdp", "closing session handle=$handle")
+            runCatching { NativeRdp.disconnect(handle) }
+            runCatching { NativeRdp.destroy(handle) }
             handle = 0
         }
-        bitmap?.recycle()
+        runCatching { bitmap?.recycle() }
         bitmap = null
         scope.cancel()
     }

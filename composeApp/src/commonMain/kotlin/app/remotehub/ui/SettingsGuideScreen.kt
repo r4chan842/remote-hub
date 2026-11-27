@@ -40,6 +40,7 @@ fun SettingsContent(
     onExpiryAlert: (Boolean) -> Unit,
     onWarningMinutes: (Int) -> Unit,
     onGuide: (String) -> Unit,
+    onLogs: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val s = LocalStrings.current
@@ -97,6 +98,15 @@ fun SettingsContent(
                         )
                     }
                 }
+            }
+        }
+
+        Panel {
+            SectionTitle(s.diagnosticsSection)
+            Text(s.diagnosticsHint, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            TextButton(onClick = onLogs, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                Symbol(Symbols.terminal, size = 18.dp)
+                Text("  " + s.logsTitle, style = MaterialTheme.typography.labelLarge)
             }
         }
 

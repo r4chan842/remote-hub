@@ -37,6 +37,7 @@ import app.remotehub.ui.BackIcon
 import app.remotehub.ui.CreateContent
 import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
+import app.remotehub.ui.LogsContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
 import app.remotehub.ui.RemoteMetrics
@@ -102,6 +103,16 @@ private val progressSteps = listOf(
     ProvisionStep("machine", StepStatus.Running, "4. Create the desktop account", null),
     ProvisionStep("network", StepStatus.Pending, null, null),
     ProvisionStep("ready", StepStatus.Pending, null, null),
+)
+
+private val logSample = listOf(
+    app.remotehub.app.LogEntry(
+        seq = 3, timeMillis = 1_760_000_003_000, level = app.remotehub.app.LogLevel.Error,
+        source = "network", message = "tailnet login: invalid key",
+        detail = "tsnet.Up: invalid authkey\nstage=login",
+    ),
+    app.remotehub.app.LogEntry(2, 1_760_000_002_000, app.remotehub.app.LogLevel.Warn, "health", "no DERP connection"),
+    app.remotehub.app.LogEntry(1, 1_760_000_001_000, app.remotehub.app.LogLevel.Info, "app", "RemoteHub started"),
 )
 
 private val emptySetup = AppState(screen = AppScreen.Setup)
@@ -195,10 +206,10 @@ private fun screenContent(name: String, strings: AppStrings, variant: Variant): 
     val expanded = variant.expanded
     when (name) {
         "01-setup-empty" -> ShellFrame(strings, variant.dark, expanded, strings.setupTitle, strings.setupSubtitle) { m ->
-            SetupContent(emptySetup, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
+            SetupContent(emptySetup, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
         }
         "02-setup-ready" -> ShellFrame(strings, variant.dark, expanded, strings.setupTitle, strings.setupSubtitle) { m ->
-            SetupContent(readySetup, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
+            SetupContent(readySetup, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
         }
         "03-create" -> ShellFrame(strings, variant.dark, expanded, strings.createTitle, strings.createSubtitle, back = true) { m ->
             CreateContent(createState, {}, {}, {}, {}, m)
@@ -223,10 +234,23 @@ private fun screenContent(name: String, strings: AppStrings, variant: Variant): 
             )
         }
         "07-settings" -> ShellFrame(strings, variant.dark, expanded, strings.settingsTitle, back = true) { m ->
-            SettingsContent(0, variant.locale, true, 15, {}, {}, {}, {}, {}, m)
+            SettingsContent(0, variant.locale, true, 15, {}, {}, {}, {}, {}, {}, m)
         }
         "08-guide" -> ShellFrame(strings, variant.dark, expanded, strings.guides, back = true) { m ->
             GuideContent("github", m)
+        }
+        "09-logs" -> ShellFrame(strings, variant.dark, expanded, strings.logsTitle, back = true) { m ->
+            LogsContent(
+                entries = logSample,
+                filter = "all",
+                query = "",
+                expandedSeq = logSample.first().seq,
+                crashNotice = null,
+                environment = "device: design bench · android 16 (API 36)",
+                onFilter = {}, onQuery = {}, onToggleDetail = {}, onCopy = {},
+                onShare = {}, onClear = {}, onRefresh = {}, onDismissCrash = {},
+                modifier = m,
+            )
         }
         else -> error("unknown screen $name")
     }
@@ -267,6 +291,7 @@ fun main(args: Array<String>) {
         "06-remote",
         "07-settings",
         "08-guide",
+        "09-logs",
     )
     var count = 0
     for (name in names) {

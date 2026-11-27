@@ -50,6 +50,7 @@ import app.remotehub.ui.BackIcon
 import app.remotehub.ui.CreateContent
 import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
+import app.remotehub.ui.LogsContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
 import app.remotehub.ui.RemoteMetrics
@@ -183,6 +184,7 @@ fun RemoteHubApp() {
                                 AppScreen.Settings -> strings.settingsTitle
                                 AppScreen.Guide -> strings.guides
                                 AppScreen.Remote -> strings.remoteDesktop
+                                AppScreen.Logs -> strings.logsTitle
                             },
                             navigationIcon = if (screen == AppScreen.Setup) null else { { BackIcon(onClick = { screen = AppScreen.Setup }) } },
                         ) { padding ->
@@ -192,7 +194,7 @@ fun RemoteHubApp() {
                                     state, {}, {}, {}, {}, {},
                                     { screen = AppScreen.Create },
                                     { screen = AppScreen.Detail },
-                                    { connected = false }, { connected = false }, m,
+                                    { connected = false }, { connected = false }, { screen = AppScreen.Logs }, m,
                                 )
                                 AppScreen.Create -> CreateContent(
                                     state,
@@ -210,9 +212,20 @@ fun RemoteHubApp() {
                                 AppScreen.Settings -> SettingsContent(
                                     themeMode, localeTag, true, 15,
                                     { themeMode = it }, { localeTag = it }, {}, {},
-                                    { screen = AppScreen.Guide }, m,
+                                    { screen = AppScreen.Guide }, { screen = AppScreen.Logs }, m,
                                 )
                                 AppScreen.Guide -> GuideContent("github", m)
+                                AppScreen.Logs -> LogsContent(
+                                    entries = sampleLogs,
+                                    filter = "all",
+                                    query = "",
+                                    expandedSeq = null,
+                                    crashNotice = null,
+                                    environment = "device: design bench\nandroid: 16 · API 36",
+                                    onFilter = {}, onQuery = {}, onToggleDetail = {}, onCopy = {},
+                                    onShare = {}, onClear = {}, onRefresh = {}, onDismissCrash = {},
+                                    modifier = m,
+                                )
                                 AppScreen.Remote -> Unit
                             }
                         }
@@ -222,6 +235,12 @@ fun RemoteHubApp() {
         }
     }
 }
+
+private val sampleLogs = listOf(
+    app.remotehub.app.LogEntry(3, 1_760_000_003_000, app.remotehub.app.LogLevel.Error, "network", "tailnet login: invalid key", "tsnet.Up: invalid authkey"),
+    app.remotehub.app.LogEntry(2, 1_760_000_002_000, app.remotehub.app.LogLevel.Info, "node", "stage=login"),
+    app.remotehub.app.LogEntry(1, 1_760_000_001_000, app.remotehub.app.LogLevel.Info, "app", "RemoteHub started"),
+)
 
 fun main() {
     application {

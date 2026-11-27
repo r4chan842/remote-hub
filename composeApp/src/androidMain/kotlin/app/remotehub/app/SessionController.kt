@@ -13,6 +13,7 @@ import app.remotehub.data.SecureStore
 import app.remotehub.data.SecretBox
 import app.remotehub.data.StoreKeys
 import app.remotehub.data.randomPassword
+import app.remotehub.diag.Diagnostics
 import app.remotehub.domain.AuthMethod
 import app.remotehub.domain.BackupRecord
 import app.remotehub.domain.ConnectionInfo
@@ -28,7 +29,9 @@ import app.remotehub.domain.ServerState
 import app.remotehub.domain.StepStatus
 import app.remotehub.domain.TailnetStatus
 import app.remotehub.github.GitHubClient
+import app.remotehub.github.GitHubException
 import app.remotehub.github.StoredServer
+import app.remotehub.i18n.stringsFor
 import app.remotehub.net.TailscaleNode
 import app.remotehub.rdp.RdpSession
 import app.remotehub.server.ProvisionEvent
@@ -78,6 +81,102 @@ class SessionController(
         onState(next)
     }
 
+    // ------------------------------------------------------------- diagnostics
+
+    /** Where the log screen returns to when it is closed. */
+    private var logsReturnScreen = AppScreen.Setup
+
+    private fun currentLogs(): List<LogEntry> = Diagnostics.snapshot(state.logFilter, state.logQuery)
+
+    /**
+     * Every failure goes through here: the raw engine text is recorded untouched,
+     * and the user sees a translated sentence plus the next concrete step.
+     */
+    private fun fail(source: String, raw: String, throwable: Throwable? = null, silent: Boolean = false) {
+        val strings = stringsFor(state.localeTag)
+        // GitHubException keeps its API message intact for tests; the status is added
+        // here so both the classifier and the log see "github HTTP 403: …".
+        val status = (throwable as? GitHubException)?.status
+        val described = if (status != null) "github HTTP $status: $raw" else raw
+        val classified = classifyError(described, strings)
+        Diagnostics.log(LogLevel.Error, source, classified.title, detail = described, throwable = throwable)
+        Diagnostics.pullNative()
+        if (silent) {
+            publish(state.copy(busy = false, errorCode = classified.code, errorDetail = described))
+            return
+        }
+        publish(
+            state.copy(
+                busy = false,
+                error = classified.banner(),
+                errorCode = classified.code,
+                errorDetail = described,
+                logs = if (state.screen == AppScreen.Logs) currentLogs() else state.logs,
+            ),
+        )
+    }
+
+    fun openLogs(filter: String = "all") {
+        Diagnostics.pullNative()
+        if (state.screen != AppScreen.Logs) logsReturnScreen = state.screen
+        publish(
+            state.copy(
+                screen = AppScreen.Logs,
+                logFilter = filter,
+                logs = Diagnostics.snapshot(filter, state.logQuery),
+                environmentReport = Diagnostics.environmentReport(),
+            ),
+        )
+    }
+
+    fun closeLogs() = publish(state.copy(screen = logsReturnScreen, expandedLogSeq = null))
+
+    fun setLogFilter(filter: String) {
+        Diagnostics.pullNative()
+        publish(state.copy(logFilter = filter, logs = Diagnostics.snapshot(filter, state.logQuery), expandedLogSeq = null))
+    }
+
+    fun setLogQuery(query: String) =
+        publish(state.copy(logQuery = query, logs = Diagnostics.snapshot(state.logFilter, query)))
+
+    fun toggleLogDetail(seq: Long) =
+        publish(state.copy(expandedLogSeq = if (state.expandedLogSeq == seq) null else seq))
+
+    fun refreshLogs() {
+        Diagnostics.pullNative()
+        publish(state.copy(logs = currentLogs()))
+    }
+
+    fun copyLogs() {
+        val text = Diagnostics.exportText(300)
+        Diagnostics.info("app", "log copied to clipboard")
+        onEffect(SideEffect.Copy(stringsFor(state.localeTag).logsCopied, text))
+    }
+
+    fun clearLogs() {
+        Diagnostics.clear()
+        publish(
+            state.copy(
+                logs = emptyList(),
+                crashNotice = null,
+                expandedLogSeq = null,
+                toast = stringsFor(state.localeTag).logsCleared,
+            ),
+        )
+    }
+
+    fun shareLogs() {
+        val file = Diagnostics.exportFile()
+        if (file == null) {
+            publish(state.copy(error = stringsFor(state.localeTag).errStorageTitle))
+            return
+        }
+        Diagnostics.info("app", "log exported: ${file.name}")
+        onEffect(SideEffect.ShareFile(file.absolutePath, "text/plain"))
+    }
+
+    fun dismissCrashNotice() = publish(state.copy(crashNotice = null))
+
     // ---------------------------------------------------------------- restore
 
     fun restore() {
@@ -110,7 +209,15 @@ class SessionController(
                 next = next.copy(servers = list.map { it.toSession() })
             }
         }
-        publish(next)
+        Diagnostics.crashNotice?.let { notice ->
+            val strings = stringsFor(next.localeTag)
+            next = next.copy(
+                crashNotice = "${strings.lastCrashTitle}\n${strings.lastCrashHint}",
+                errorDetail = notice.detail.ifBlank { notice.message },
+            )
+        }
+        Diagnostics.info("app", "session restored: servers=${next.servers.size} github=${next.account != null}")
+        publish(next.copy(logs = Diagnostics.snapshot(next.logFilter, next.logQuery)))
         if (token != null) refreshAccount()
         val key = store.get(StoreKeys.TS_AUTH_KEY)
         if (!key.isNullOrBlank()) connectNetwork(key, silent = true)
@@ -180,6 +287,11 @@ class SessionController(
                     store.put(StoreKeys.GITHUB_LOGIN, validation.user.login)
                     store.put(StoreKeys.GITHUB_METHOD, AuthMethod.PersonalAccessToken.name)
                     store.put(StoreKeys.GITHUB_SCOPES, validation.scopes.joinToString(","))
+                    Diagnostics.info(
+                        "github",
+                        "token accepted for ${validation.user.login} · scopes=${validation.scopes.joinToString(",")} " +
+                            "· missing=${validation.missing.joinToString(",")}",
+                    )
                     publish(
                         state.copy(
                             busy = false,
@@ -198,7 +310,7 @@ class SessionController(
                 }
                 .onFailure { error ->
                     client.close()
-                    publish(state.copy(busy = false, error = error.message ?: context.getString(R.string.err_token_invalid)))
+                    fail("github", error.message ?: context.getString(R.string.err_token_invalid), error)
                 }
         }
     }
@@ -245,32 +357,25 @@ class SessionController(
                 .onSuccess { status ->
                     applyNodeStatus(status)
                     if (status.running) {
-                        publish(state.copy(busy = false, error = null))
+                        publish(state.copy(busy = false, error = null, errorCode = null, errorDetail = null))
                         node.startPolling { applyNodeStatus(it) }
                     } else {
                         // Show what the tunnel actually reported instead of a bare status word.
-                        val detail = status.logs.takeLast(3).joinToString(" · ")
                         val message = status.error.ifBlank { context.getString(R.string.err_network) }
-                        publish(
-                            state.copy(
-                                busy = false,
-                                error = if (detail.isBlank()) message else "$message\n$detail",
-                                tailnet = state.tailnet.copy(state = NetworkState.Error, lastError = message),
-                            ),
-                        )
+                        publish(state.copy(tailnet = state.tailnet.copy(state = NetworkState.Error, lastError = message)))
+                        fail("network", message, silent = silent)
                     }
                 }
                 .onFailure { error ->
                     publish(
                         state.copy(
-                            busy = false,
-                            error = if (silent) null else (error.message ?: context.getString(R.string.err_network)),
                             tailnet = state.tailnet.copy(
                                 state = NetworkState.Error,
                                 lastError = error.message ?: "tailscale start failed",
                             ),
                         ),
                     )
+                    fail("network", error.message ?: context.getString(R.string.err_network), error, silent = silent)
                 }
         }
     }
@@ -352,6 +457,10 @@ class SessionController(
             publish(state.copy(error = context.getString(R.string.err_name_empty)))
             return
         }
+        Diagnostics.info(
+            "provision",
+            "creating server name=${form.name} minutes=${form.durationMinutes} repo=${state.repositoryName}",
+        )
         publish(state.copy(screen = AppScreen.Progress, provisioning = true, steps = emptyList(), progressLog = emptyList(), error = null))
         provisionJob = scope.launch {
             val provisioner = Provisioner(
@@ -412,7 +521,8 @@ class SessionController(
                 resolveEndpoint(session.id)
                 watchRun(session.id)
             }.onFailure { error ->
-                publish(state.copy(provisioning = false, error = error.message ?: context.getString(R.string.err_provision)))
+                publish(state.copy(provisioning = false))
+                fail("provision", error.message ?: context.getString(R.string.err_provision), error)
             }
         }
     }
@@ -420,9 +530,12 @@ class SessionController(
     private fun applyProvisionEvent(event: ProvisionEvent) {
         when (event) {
             is ProvisionEvent.Steps -> publish(state.copy(steps = event.steps))
-            is ProvisionEvent.Log -> publish(state.copy(progressLog = (state.progressLog + event.line).takeLast(20)))
-            is ProvisionEvent.Ready -> Unit
-            is ProvisionEvent.Failed -> publish(state.copy(error = event.message))
+            is ProvisionEvent.Log -> {
+                Diagnostics.info("provision", event.line)
+                publish(state.copy(progressLog = (state.progressLog + event.line).takeLast(20)))
+            }
+            is ProvisionEvent.Ready -> Diagnostics.info("provision", "session endpoint reported ready")
+            is ProvisionEvent.Failed -> fail("provision", event.message)
         }
     }
 
@@ -515,6 +628,10 @@ class SessionController(
     // ---------------------------------------------------------------- countdown
 
     fun tick() {
+        if (state.screen == AppScreen.Logs) {
+            Diagnostics.pullNative()
+            publish(state.copy(logs = currentLogs()))
+        }
         if (state.servers.isEmpty()) return
         val now = Clock.System.now().toEpochMilliseconds()
         var changed = false
@@ -592,9 +709,10 @@ class SessionController(
                 metricsCache[serverId] = metrics
                 publish(state.copy())
             }
-            rdp.onError = { message -> publish(state.copy(error = message)) }
+            rdp.onError = { message -> fail("rdp", message) }
             runCatching { rdp.connect() }
                 .onSuccess {
+                    Diagnostics.info("rdp", "connected to ${session.connection?.address}:${session.connection?.port}")
                     updateServer(serverId) { it.copy(state = ServerState.Connected) }
                     startSessionService(session.name)
                     publish(state.copy(busy = false))
@@ -602,7 +720,7 @@ class SessionController(
                 .onFailure { error ->
                     rdpSessions.remove(serverId)
                     rdp.close()
-                    publish(state.copy(busy = false, error = error.message ?: context.getString(R.string.err_rdp)))
+                    fail("rdp", error.message ?: context.getString(R.string.err_rdp), error)
                 }
         }
     }
@@ -646,10 +764,12 @@ class SessionController(
     fun stopServer(serverId: String) {
         val client = github ?: return
         val session = state.servers.firstOrNull { it.id == serverId } ?: return
+        Diagnostics.info("provision", "stopping server ${session.name} run=${session.runId}")
         scope.launch {
             val parts = session.repositoryFullName.split("/")
             if (parts.size != 2) return@launch
             runCatching { client.cancel(parts[0], parts[1], session.runId) }
+                .onFailure { Diagnostics.warn("provision", "cancel run failed", it) }
             rdpSessions.remove(serverId)?.close()
             metricsCache.remove(serverId)
             updateServer(serverId) {
@@ -725,7 +845,7 @@ class SessionController(
             }.onSuccess {
                 publish(state.copy(busy = false, toast = context.getString(R.string.backup_stored)))
             }.onFailure { error ->
-                publish(state.copy(busy = false, error = error.message ?: context.getString(R.string.err_backup)))
+                fail("backup", error.message ?: context.getString(R.string.err_backup), error)
             }
         }
     }

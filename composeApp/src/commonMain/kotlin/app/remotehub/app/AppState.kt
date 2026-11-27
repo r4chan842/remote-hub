@@ -8,7 +8,7 @@ import app.remotehub.domain.TailnetStatus
 import app.remotehub.server.SessionWorkflow
 
 /** The linear path a new user walks: checklist, create, progress, detail, remote. */
-enum class AppScreen { Setup, Create, Progress, Detail, Remote, Settings, Guide }
+enum class AppScreen { Setup, Create, Progress, Detail, Remote, Settings, Guide, Logs }
 
 /** The two things that must be real before a server can be created. */
 enum class SetupItem { GitHub, Network }
@@ -56,6 +56,16 @@ data class AppState(
     val warningMinutes: Int = 15,
     val publicRepository: Boolean = true,
     val repositoryName: String = "remote-hub-sessions",
+
+    // diagnostics
+    val logs: List<LogEntry> = emptyList(),
+    val logFilter: String = "all",
+    val logQuery: String = "",
+    val expandedLogSeq: Long? = null,
+    val errorDetail: String? = null,
+    val errorCode: String? = null,
+    val crashNotice: String? = null,
+    val environmentReport: String = "",
 
     // transient
     val busy: Boolean = false,

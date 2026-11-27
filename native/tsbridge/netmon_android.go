@@ -25,6 +25,17 @@ func init() {
 	netmon.RegisterInterfaceGetter(androidInterfaces)
 }
 
+// applyAndroidVersion tells anet which enumeration path is legal on this device.
+// anet maps any release >= 11 to API 30 and uses ioctl(SIOCGIFCONF) from there on.
+func applyAndroidVersion(major int) {
+	if major <= 0 {
+		// 0 means "detect it yourself" through android_get_device_api_level().
+		anet.SetAndroidVersion(0)
+		return
+	}
+	anet.SetAndroidVersion(uint(major))
+}
+
 func androidInterfaces() ([]netmon.Interface, error) {
 	ifs, err := anet.Interfaces()
 	if err != nil {
@@ -36,7 +47,11 @@ func androidInterfaces() ([]netmon.Interface, error) {
 		// AltAddrs must be non-nil, even when empty: a nil slice makes netmon fall
 		// back to net.Interface.Addrs(), which is the netlink call we are avoiding.
 		addrs, err := anet.InterfaceAddrsByInterface(iface)
-		if err != nil || addrs == nil {
+		if err != nil {
+			diagLogf("WARN", "netmon", "interface %s addresses: %v", iface.Name, err)
+			addrs = []net.Addr{}
+		}
+		if addrs == nil {
 			addrs = []net.Addr{}
 		}
 		out = append(out, netmon.Interface{Interface: iface, AltAddrs: addrs})
