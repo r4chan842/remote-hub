@@ -10,11 +10,16 @@ export ANDROID_NDK_HOME="$GOMOBILE_NDK"
 export PATH="$PATH:$(go env GOPATH)/bin"
 
 GOMOBILE_VERSION="v0.0.0-20261117202452-47699113848a"
+
+go get "golang.org/x/mobile@${GOMOBILE_VERSION}"
+go get -tool "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
+go get -tool "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_VERSION}"
+go mod tidy
+go mod verify
+
 go install "golang.org/x/mobile/cmd/gomobile@${GOMOBILE_VERSION}"
 go install "golang.org/x/mobile/cmd/gobind@${GOMOBILE_VERSION}"
 
-go mod download
-go mod verify
 gomobile init
 
 mkdir -p out

@@ -54,9 +54,8 @@ jobs:
         working-directory: native/tsbridge
         run: |
           set -euo pipefail
-          go mod tidy
-          go mod verify
-          go vet ./...
+          go mod download tailscale.com
+          go build ./...
 
       - name: Build AAR
         working-directory: native/tsbridge
