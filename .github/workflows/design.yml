@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           count=$(find composeApp/build/screens -name '*.png' | wc -l)
           echo "rendered=$count"
-          test "$count" -eq 44
+          test "$count" -eq 32
           find composeApp/build/screens -name '*.png' -size -8k -print | tee /tmp/small.txt
           test ! -s /tmp/small.txt
 

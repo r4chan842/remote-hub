@@ -57,7 +57,6 @@ jobs:
 
       - name: Build per-ABI APKs (debug-signed)
         env:
-          RH_GITHUB_CLIENT_ID: ${{ vars.RH_GITHUB_CLIENT_ID }}
         run: >
           gradle --no-daemon :composeApp:assembleRelease
           -PappVersionCode=${VERSION_CODE}

@@ -1,11 +1,37 @@
 package app.remotehub.server
 
+/**
+ * The session workflow runs a temporary Windows desktop on a GitHub-hosted runner and
+ * joins it to the user's private Tailscale network. The phone reaches it over that
+ * tunnel; nothing is exposed on the runner's public address.
+ *
+ * Hardening compared with the circulating "Windows Cloud RDP" snippet:
+ *  - the RDP password is generated on the phone, stored as a sealed repository secret
+ *    and masked in the log; it is never printed, so a public repository stays usable
+ *  - Network Level Authentication stays enabled
+ *  - the RDP firewall rule is scoped to the Tailscale address range, not to every profile
+ *  - the node joins as ephemeral, so it disappears from the tailnet when the job ends
+ *  - the built-in runneradmin account is left untouched
+ *  - the lifetime is the requested number of minutes, capped at the 6 hour job ceiling
+ *  - a cleanup step always logs the node out, even when the job is cancelled
+ */
 object SessionWorkflow {
-    const val FILE_NAME = "session.yml"
-    const val PATH = ".github/workflows/session.yml"
+    const val FILE_NAME = "windows-rdp.yml"
+    const val PATH = ".github/workflows/windows-rdp.yml"
+
+    /** GitHub terminates a hosted job after six hours; never ask for more. */
+    const val MAX_MINUTES = 360
+    const val DEFAULT_MINUTES = 360
+    const val MIN_MINUTES = 15
+
+    /** Pinned so a new upstream release cannot silently change the session behaviour. */
+    const val TAILSCALE_MSI = "https://pkgs.tailscale.com/stable/tailscale-setup-1.104.7-amd64.msi"
+
+    /** Verified against the published package; the installer is rejected if it differs. */
+    const val TAILSCALE_MSI_SHA256 = "676b5b32fdd1aeaee90d8e8f38e222635b216fbdfbf877bf01cb1d7cda330ec5"
 
     fun render(checkoutSha: String, uploadArtifactSha: String): String = """
-name: Provision Remote Host
+name: Windows Cloud RDP
 
 on:
   workflow_dispatch:
@@ -14,249 +40,180 @@ on:
         description: Session identifier
         required: true
         type: string
-      action:
-        description: provision or destroy
-        required: true
-        default: provision
-        type: string
       minutes:
-        description: Requested lifetime, enforced on the host itself
+        description: Session lifetime in minutes (15..360)
         required: true
-        default: "120"
+        default: "$DEFAULT_MINUTES"
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: host-${'$'}{{ inputs.session_id }}
+  group: remotehub-${'$'}{{ inputs.session_id }}
   cancel-in-progress: false
 
 jobs:
-  orchestrate:
-    name: Orchestrate provider
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  build:
+    name: Windows session
+    runs-on: windows-2025
+    timeout-minutes: $MAX_MINUTES
     steps:
-      - uses: actions/checkout@$checkoutSha
-
-      - name: Validate request
-        env:
-          ACTION: ${'$'}{{ inputs.action }}
-          MINUTES: ${'$'}{{ inputs.minutes }}
-          PROVIDER: ${'$'}{{ vars.REMOTEHUB_PROVIDER }}
-        run: |
-          set -euo pipefail
-          case "${'$'}ACTION" in provision|destroy) ;; *) echo "bad action" >&2; exit 1 ;; esac
-          printf '%s' "${'$'}MINUTES" | grep -Eq '^[0-9]+$' || { echo "bad minutes" >&2; exit 1; }
-          [ "${'$'}MINUTES" -ge 15 ] && [ "${'$'}MINUTES" -le 1440 ] || { echo "minutes out of range" >&2; exit 1; }
-          case "${'$'}PROVIDER" in hetzner|digitalocean) ;; *) echo "unsupported provider" >&2; exit 1 ;; esac
-          {
-            echo "RH_ACTION=${'$'}ACTION"
-            echo "RH_MINUTES=${'$'}MINUTES"
-            echo "RH_PROVIDER=${'$'}PROVIDER"
-          } >> "${'$'}GITHUB_ENV"
-
-      - name: Provision host
-        if: env.RH_ACTION == 'provision'
+      - name: 1. Validate request
+        shell: pwsh
         env:
           SESSION_ID: ${'$'}{{ inputs.session_id }}
-          PROVIDER_TOKEN: ${'$'}{{ secrets.PROVIDER_TOKEN }}
-          TS_AUTHKEY: ${'$'}{{ secrets.TS_AUTHKEY }}
+          MINUTES: ${'$'}{{ inputs.minutes }}
+        run: |
+          ${'$'}ErrorActionPreference = "Stop"
+          if (${'$'}env:SESSION_ID -notmatch '^[a-z0-9-]{3,40}${'$'}') { throw "invalid session id" }
+          ${'$'}minutes = 0
+          if (-not [int]::TryParse(${'$'}env:MINUTES, [ref]${'$'}minutes)) { throw "invalid minutes" }
+          if (${'$'}minutes -lt $MIN_MINUTES -or ${'$'}minutes -gt $MAX_MINUTES) { throw "minutes out of range" }
+          "RH_SESSION=${'$'}env:SESSION_ID" >> ${'$'}env:GITHUB_ENV
+          "RH_MINUTES=${'$'}minutes" >> ${'$'}env:GITHUB_ENV
+          "RH_HOSTNAME=rh-${'$'}env:SESSION_ID" >> ${'$'}env:GITHUB_ENV
+          # The clock starts now, so setup time is inside the requested lifetime and the
+          # job always finishes before GitHub's six hour ceiling.
+          "RH_DEADLINE=$((Get-Date).AddMinutes(${'}'}minutes).ToUniversalTime().ToString('o'))" >> ${'$'}env:GITHUB_ENV
+          Write-Host "Session ${'$'}env:SESSION_ID requested for ${'$'}minutes minutes."
+
+      - name: 2. Enable Remote Desktop
+        shell: pwsh
+        run: |
+          ${'$'}ErrorActionPreference = "Stop"
+          # Accept RDP connections, but keep Network Level Authentication on.
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name UserAuthentication -Value 1
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name SecurityLayer -Value 2
+          Set-Service -Name TermService -StartupType Automatic
+          Write-Host "Remote Desktop enabled with NLA."
+
+      - name: 3. Restrict RDP to the private network
+        shell: pwsh
+        run: |
+          ${'$'}ErrorActionPreference = "Stop"
+          # The runner has a public address. Disable the built-in wide-open rules and
+          # allow 3389 only from the Tailscale CGNAT range, so the desktop is reachable
+          # from the user's own tailnet and from nowhere else.
+          Get-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue |
+            Disable-NetFirewallRule
+          New-NetFirewallRule -DisplayName "RemoteHub RDP over Tailscale" `
+            -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3389 `
+            -RemoteAddress 100.64.0.0/10 -Profile Any | Out-Null
+          New-NetFirewallRule -DisplayName "RemoteHub RDP over Tailscale UDP" `
+            -Direction Inbound -Action Allow -Protocol UDP -LocalPort 3389 `
+            -RemoteAddress 100.64.0.0/10 -Profile Any | Out-Null
+          Write-Host "RDP restricted to 100.64.0.0/10."
+
+      - name: 4. Create the session account
+        shell: pwsh
+        env:
           RDP_USERNAME: ${'$'}{{ secrets.RDP_USERNAME }}
           RDP_PASSWORD: ${'$'}{{ secrets.RDP_PASSWORD }}
-          REGION: ${'$'}{{ secrets.SESSION_REGION }}
-          SIZE: ${'$'}{{ secrets.SESSION_SIZE }}
-          IMAGE: ${'$'}{{ secrets.SESSION_IMAGE }}
-        run: bash scripts/provision-host.sh provision
-
-      - name: Destroy host
-        if: env.RH_ACTION == 'destroy'
-        env:
-          SESSION_ID: ${'$'}{{ inputs.session_id }}
-          PROVIDER_TOKEN: ${'$'}{{ secrets.PROVIDER_TOKEN }}
-        run: bash scripts/provision-host.sh destroy
-
-      - name: Redact and upload manifest
-        if: always()
         run: |
-          set -euo pipefail
-          if [ -d manifest ]; then
-            for f in manifest/*; do
-              [ -e "${'$'}f" ] || continue
-              sed -Ei 's/(tskey-[a-z]+-)[A-Za-z0-9-]+/\1REDACTED/g' "${'$'}f"
-              sed -Ei 's/("(password|token|secret)"[[:space:]]*:[[:space:]]*")[^"]*/\1REDACTED/gi' "${'$'}f"
-            done
-          fi
+          ${'$'}ErrorActionPreference = "Stop"
+          # Mask before the value is ever touched, so no later step can leak it.
+          Write-Output "::add-mask::${'$'}env:RDP_PASSWORD"
+          if ([string]::IsNullOrWhiteSpace(${'$'}env:RDP_PASSWORD)) { throw "RDP_PASSWORD secret is missing" }
+          ${'$'}user = ${'$'}env:RDP_USERNAME
+          if ([string]::IsNullOrWhiteSpace(${'$'}user)) { ${'$'}user = "rhuser" }
+          ${'$'}secure = ConvertTo-SecureString ${'$'}env:RDP_PASSWORD -AsPlainText -Force
+          if (Get-LocalUser -Name ${'$'}user -ErrorAction SilentlyContinue) {
+            Set-LocalUser -Name ${'$'}user -Password ${'$'}secure
+          } else {
+            New-LocalUser -Name ${'$'}user -Password ${'$'}secure -PasswordNeverExpires -AccountNeverExpires | Out-Null
+          }
+          Add-LocalGroupMember -Group "Administrators" -Member ${'$'}user -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member ${'$'}user -ErrorAction SilentlyContinue
+          "RH_USER=${'$'}user" >> ${'$'}env:GITHUB_ENV
+          Write-Host "Account ${'$'}user is ready. The password stays on your phone."
 
-      - name: Upload manifest
-        if: always()
+      - name: 5. Join the private network
+        shell: pwsh
+        env:
+          TAILSCALE_AUTHKEY: ${'$'}{{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          ${'$'}ErrorActionPreference = "Stop"
+          Write-Output "::add-mask::${'$'}env:TAILSCALE_AUTHKEY"
+          if ([string]::IsNullOrWhiteSpace(${'$'}env:TAILSCALE_AUTHKEY)) { throw "TAILSCALE_AUTHKEY secret is missing" }
+          Invoke-WebRequest "$TAILSCALE_MSI" -OutFile "C:\tailscale.msi" -UseBasicParsing
+          ${'$'}hash = (Get-FileHash "C:\tailscale.msi" -Algorithm SHA256).Hash.ToLower()
+          if (${'$'}hash -ne "$TAILSCALE_MSI_SHA256") { throw "Tailscale installer checksum mismatch" }
+          Start-Process msiexec -ArgumentList '/i C:\tailscale.msi /quiet /norestart' -Wait
+          Remove-Item C:\tailscale.msi -Force -ErrorAction SilentlyContinue
+          ${'$'}exe = "C:\Program Files\Tailscale\tailscale.exe"
+          Start-Sleep -Seconds 5
+          # Ephemeral: the node is removed from the tailnet as soon as it goes offline.
+          & ${'$'}exe up --authkey="${'$'}env:TAILSCALE_AUTHKEY" --hostname="${'$'}env:RH_HOSTNAME" --ephemeral --accept-dns=false --ssh=false --timeout=120s
+          if (${'$'}LASTEXITCODE -ne 0) { throw "tailscale up failed" }
+          ${'$'}ip = ""
+          foreach (${'$'}attempt in 1..20) {
+            ${'$'}ip = (& ${'$'}exe ip -4 2>${'$'}null | Select-Object -First 1)
+            if (${'$'}ip) { break }
+            Start-Sleep -Seconds 3
+          }
+          if (-not ${'$'}ip) { throw "no Tailscale address assigned" }
+          "RH_IP=${'$'}ip" >> ${'$'}env:GITHUB_ENV
+          Write-Host "Joined the tailnet as ${'$'}env:RH_HOSTNAME at ${'$'}ip."
+
+      - name: 6. Publish the endpoint
+        shell: pwsh
+        run: |
+          ${'$'}ErrorActionPreference = "Stop"
+          # Only the address is published. Credentials never reach the log or the artifact.
+          ${'$'}manifest = [ordered]@{
+            session_id = ${'$'}env:RH_SESSION
+            hostname   = ${'$'}env:RH_HOSTNAME
+            address    = ${'$'}env:RH_IP
+            port       = 3389
+            username   = ${'$'}env:RH_USER
+            minutes    = [int]${'$'}env:RH_MINUTES
+            started_at = (Get-Date).ToUniversalTime().ToString("o")
+          }
+          New-Item -ItemType Directory -Force -Path endpoint | Out-Null
+          ${'$'}manifest | ConvertTo-Json | Set-Content -Path endpoint/session.json -Encoding UTF8
+          ${'$'}summary = "### Windows session ready`n`n| Field | Value |`n| --- | --- |`n"
+          ${'$'}summary += "| Address | ``${'$'}env:RH_IP`` |`n"
+          ${'$'}summary += "| Port | ``3389`` |`n"
+          ${'$'}summary += "| Username | ``${'$'}env:RH_USER`` |`n"
+          ${'$'}summary += "| Lifetime | ${'$'}env:RH_MINUTES minutes |`n`n"
+          ${'$'}summary += "The password is not shown here. RemoteHub already holds it on your device.`n"
+          ${'$'}summary >> ${'$'}env:GITHUB_STEP_SUMMARY
+          Write-Host "Endpoint published: ${'$'}env:RH_IP"
+
+      - name: Upload endpoint
         uses: actions/upload-artifact@$uploadArtifactSha
         with:
-          name: host-manifest
-          path: manifest
+          name: session-endpoint
+          path: endpoint/session.json
           retention-days: 1
-          if-no-files-found: warn
-""".trimIndent()
 
-    const val HOST_SCRIPT_PATH = "scripts/provision-host.sh"
+      - name: 7. Keep the session alive
+        shell: pwsh
+        run: |
+          ${'$'}ErrorActionPreference = "Stop"
+          ${'$'}total = [int]${'$'}env:RH_MINUTES
+          ${'$'}deadline = [datetime]::Parse(${'$'}env:RH_DEADLINE).ToUniversalTime()
+          Write-Host "Session runs until ${'$'}(${'$'}deadline.ToUniversalTime().ToString('u')) (${'$'}total minutes)."
+          ${'$'}minute = 0
+          while ((Get-Date).ToUniversalTime() -lt ${'$'}deadline) {
+            Start-Sleep -Seconds 60
+            ${'$'}minute++
+            ${'$'}left = [int]([math]::Ceiling((${'$'}deadline - (Get-Date).ToUniversalTime()).TotalMinutes))
+            Write-Host "[${'$'}minute/${'$'}total] alive, ${'$'}left minutes remaining"
+          }
+          Write-Host "Requested lifetime reached."
 
-    val hostScript: String = """
-#!/usr/bin/env bash
-set -euo pipefail
-
-MODE="${'$'}{1:-provision}"
-: "${'$'}{SESSION_ID:?}"
-: "${'$'}{PROVIDER_TOKEN:?}"
-: "${'$'}{RH_PROVIDER:?}"
-
-mkdir -p manifest
-LABEL="remotehub=${'$'}SESSION_ID"
-HOSTNAME="rh-${'$'}SESSION_ID"
-
-redact() {
-  sed -E 's/(tskey-[a-z]+-)[A-Za-z0-9-]+/\1REDACTED/g'
-}
-
-hetzner_api() {
-  local method="${'$'}1" path="${'$'}2" body="${'$'}3"
-  if [ -n "${'$'}body" ]; then
-    curl -fsS -X "${'$'}method" "https://api.hetzner.cloud/v1${'$'}path" \
-      -H "Authorization: Bearer ${'$'}PROVIDER_TOKEN" \
-      -H 'Content-Type: application/json' -d "${'$'}body"
-  else
-    curl -fsS -X "${'$'}method" "https://api.hetzner.cloud/v1${'$'}path" \
-      -H "Authorization: Bearer ${'$'}PROVIDER_TOKEN"
-  fi
-}
-
-do_api() {
-  local method="${'$'}1" path="${'$'}2" body="${'$'}3"
-  if [ -n "${'$'}body" ]; then
-    curl -fsS -X "${'$'}method" "https://api.digitalocean.com/v2${'$'}path" \
-      -H "Authorization: Bearer ${'$'}PROVIDER_TOKEN" \
-      -H 'Content-Type: application/json' -d "${'$'}body"
-  else
-    curl -fsS -X "${'$'}method" "https://api.digitalocean.com/v2${'$'}path" \
-      -H "Authorization: Bearer ${'$'}PROVIDER_TOKEN"
-  fi
-}
-
-cloud_init() {
-  cat <<CLOUDINIT
-#cloud-config
-package_update: true
-packages:
-  - xrdp
-  - xorgxrdp
-  - xfce4
-  - xfce4-terminal
-  - dbus-x11
-  - curl
-  - jq
-  - unattended-upgrades
-runcmd:
-  - [ bash, -lc, "useradd -m -s /bin/bash ${'$'}RDP_USERNAME || true" ]
-  - [ bash, -lc, "printf '%s:%s\\n' '${'$'}RDP_USERNAME' '${'$'}RDP_PASSWORD' | chpasswd" ]
-  - [ bash, -lc, "usermod -aG ssl-cert ${'$'}RDP_USERNAME" ]
-  - [ bash, -lc, "printf 'xfce4-session\\n' > /home/${'$'}RDP_USERNAME/.xsession && chown ${'$'}RDP_USERNAME:${'$'}RDP_USERNAME /home/${'$'}RDP_USERNAME/.xsession" ]
-  - [ bash, -lc, "sed -i 's/^security_layer=.*/security_layer=negotiate/;s/^crypt_level=.*/crypt_level=high/;s/^max_bpp=.*/max_bpp=24/;s/^tcp_nodelay=.*/tcp_nodelay=true/;s/^tcp_keepalive=.*/tcp_keepalive=true/' /etc/xrdp/xrdp.ini" ]
-  - [ bash, -lc, "curl -fsSL https://tailscale.com/install.sh | sh" ]
-  - [ bash, -lc, "tailscale up --authkey='${'$'}TS_AUTHKEY' --hostname='${'$'}HOSTNAME' --accept-dns=false --ssh=false --timeout=120s" ]
-  - [ bash, -lc, "systemctl enable --now xrdp" ]
-  - [ bash, -lc, "ufw allow in on tailscale0 to any port 3389 proto tcp || true" ]
-  - [ bash, -lc, "printf '#!/usr/bin/env bash\\nsleep %s\\ntailscale logout\\nsystemctl stop xrdp\\nshutdown -h now\\n' ${'$'}(( RH_MINUTES * 60 )) > /usr/local/bin/remotehub-expire && chmod +x /usr/local/bin/remotehub-expire" ]
-  - [ bash, -lc, "systemd-run --on-active=${'$'}(( RH_MINUTES * 60 )) --unit=remotehub-expire /usr/local/bin/remotehub-expire" ]
-CLOUDINIT
-}
-
-provision_hetzner() {
-  local userdata
-  userdata="${'$'}(cloud_init)"
-  local payload
-  payload="${'$'}(jq -n --arg name "${'$'}HOSTNAME" --arg type "${'$'}SIZE" --arg image "${'$'}IMAGE" \
-    --arg loc "${'$'}REGION" --arg ud "${'$'}userdata" --arg label "${'$'}LABEL" \
-    '{name:${'$'}name, server_type:${'$'}type, image:${'$'}image, location:${'$'}loc, user_data:${'$'}ud, labels:{remotehub:${'$'}label}, start_after_create:true}')"
-  local created
-  created="${'$'}(hetzner_api POST /servers "${'$'}payload")"
-  local id ipv4
-  id="${'$'}(printf '%s' "${'$'}created" | jq -r '.server.id')"
-  for _ in ${'$'}(seq 1 60); do
-    local detail
-    detail="${'$'}(hetzner_api GET "/servers/${'$'}id" "")"
-    local status
-    status="${'$'}(printf '%s' "${'$'}detail" | jq -r '.server.status')"
-    ipv4="${'$'}(printf '%s' "${'$'}detail" | jq -r '.server.public_net.ipv4.ip')"
-    if [ "${'$'}status" = "running" ] && [ "${'$'}ipv4" != "null" ]; then break; fi
-    sleep 5
-  done
-  jq -n --arg provider hetzner --arg id "${'$'}id" --arg ipv4 "${'$'}ipv4" \
-    --arg hostname "${'$'}HOSTNAME" --arg session "${'$'}SESSION_ID" \
-    --arg user "${'$'}RDP_USERNAME" --argjson port 3389 --argjson minutes "${'$'}RH_MINUTES" \
-    --arg created "${'$'}(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{provider:${'$'}provider, provider_id:${'$'}id, public_ipv4:${'$'}ipv4, hostname:${'$'}hostname, session_id:${'$'}session, username:${'$'}user, port:${'$'}port, minutes:${'$'}minutes, created_at:${'$'}created}' \
-    > manifest/host.json
-}
-
-destroy_hetzner() {
-  local list id
-  list="${'$'}(hetzner_api GET "/servers?label_selector=${'$'}LABEL" "")"
-  id="${'$'}(printf '%s' "${'$'}list" | jq -r '.servers[0].id // empty')"
-  if [ -z "${'$'}id" ]; then
-    list="${'$'}(hetzner_api GET "/servers?name=${'$'}HOSTNAME" "")"
-    id="${'$'}(printf '%s' "${'$'}list" | jq -r '.servers[0].id // empty')"
-  fi
-  if [ -n "${'$'}id" ]; then
-    hetzner_api DELETE "/servers/${'$'}id" "" >/dev/null
-    jq -n --arg provider hetzner --arg id "${'$'}id" '{provider:${'$'}provider, provider_id:${'$'}id, destroyed:true}' > manifest/host.json
-  else
-    jq -n --arg provider hetzner '{provider:${'$'}provider, destroyed:false, reason:"not found"}' > manifest/host.json
-  fi
-}
-
-provision_do() {
-  local userdata payload created id ipv4
-  userdata="${'$'}(cloud_init)"
-  payload="${'$'}(jq -n --arg name "${'$'}HOSTNAME" --arg region "${'$'}REGION" --arg size "${'$'}SIZE" \
-    --arg image "${'$'}IMAGE" --arg ud "${'$'}userdata" --arg tag "remotehub-${'$'}SESSION_ID" \
-    '{name:${'$'}name, region:${'$'}region, size:${'$'}size, image:${'$'}image, user_data:${'$'}ud, tags:[${'$'}tag], backups:false, monitoring:false}')"
-  created="${'$'}(do_api POST /droplets "${'$'}payload")"
-  id="${'$'}(printf '%s' "${'$'}created" | jq -r '.droplet.id')"
-  for _ in ${'$'}(seq 1 60); do
-    local detail status
-    detail="${'$'}(do_api GET "/droplets/${'$'}id" "")"
-    status="${'$'}(printf '%s' "${'$'}detail" | jq -r '.droplet.status')"
-    ipv4="${'$'}(printf '%s' "${'$'}detail" | jq -r '[.droplet.networks.v4[] | select(.type=="public")][0].ip_address // empty')"
-    if [ "${'$'}status" = "active" ] && [ -n "${'$'}ipv4" ]; then break; fi
-    sleep 5
-  done
-  jq -n --arg provider digitalocean --arg id "${'$'}id" --arg ipv4 "${'$'}ipv4" \
-    --arg hostname "${'$'}HOSTNAME" --arg session "${'$'}SESSION_ID" \
-    --arg user "${'$'}RDP_USERNAME" --argjson port 3389 --argjson minutes "${'$'}RH_MINUTES" \
-    --arg created "${'$'}(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{provider:${'$'}provider, provider_id:${'$'}id, public_ipv4:${'$'}ipv4, hostname:${'$'}hostname, session_id:${'$'}session, username:${'$'}user, port:${'$'}port, minutes:${'$'}minutes, created_at:${'$'}created}' \
-    > manifest/host.json
-}
-
-destroy_do() {
-  local id
-  id="${'$'}(do_api GET "/droplets?tag_name=remotehub-${'$'}SESSION_ID" "" | jq -r '.droplets[0].id // empty')"
-  if [ -n "${'$'}id" ]; then
-    do_api DELETE "/droplets/${'$'}id" "" >/dev/null
-    jq -n --arg provider digitalocean --arg id "${'$'}id" '{provider:${'$'}provider, provider_id:${'$'}id, destroyed:true}' > manifest/host.json
-  else
-    jq -n --arg provider digitalocean '{provider:${'$'}provider, destroyed:false, reason:"not found"}' > manifest/host.json
-  fi
-}
-
-case "${'$'}RH_PROVIDER:${'$'}MODE" in
-  hetzner:provision) provision_hetzner ;;
-  hetzner:destroy) destroy_hetzner ;;
-  digitalocean:provision) provision_do ;;
-  digitalocean:destroy) destroy_do ;;
-  *) echo "unsupported combination" >&2; exit 1 ;;
-esac
-
-cat manifest/host.json | redact
+      - name: Leave the private network
+        if: always()
+        shell: pwsh
+        run: |
+          ${'$'}exe = "C:\Program Files\Tailscale\tailscale.exe"
+          if (Test-Path ${'$'}exe) {
+            & ${'$'}exe logout 2>${'$'}null
+            Write-Host "Node logged out."
+          }
+          exit 0
 """.trimIndent()
 }

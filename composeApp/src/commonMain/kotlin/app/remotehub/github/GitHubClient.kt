@@ -123,8 +123,8 @@ class GitHubClient(
         return decode(response)
     }
 
-    suspend fun createRepository(name: String, description: String): GhRepo =
-        decode(request("POST", "/user/repos", CreateRepoRequest(name, false, true, description)))
+    suspend fun createRepository(name: String, description: String, private: Boolean = false): GhRepo =
+        decode(request("POST", "/user/repos", CreateRepoRequest(name, private, true, description)))
 
     suspend fun publicKey(owner: String, repo: String): RepoPublicKey =
         decode(request("GET", "/repos/$owner/$repo/actions/secrets/public-key"))

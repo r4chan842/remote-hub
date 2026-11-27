@@ -63,7 +63,6 @@ jobs:
 
       - name: Build per-ABI release APKs (debug-signed, not for distribution)
         env:
-          RH_GITHUB_CLIENT_ID: ${{ vars.RH_GITHUB_CLIENT_ID }}
           VERSION_CODE: ${{ inputs.version_code }}
           VERSION_NAME: ${{ inputs.version_name }}
         run: |

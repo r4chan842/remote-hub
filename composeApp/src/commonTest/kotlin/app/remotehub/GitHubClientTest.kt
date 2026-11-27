@@ -1,7 +1,5 @@
 package app.remotehub
 
-import app.remotehub.github.DeviceFlowClient
-import app.remotehub.github.DevicePoll
 import app.remotehub.github.GitHubClient
 import app.remotehub.github.GitHubException
 import io.ktor.client.engine.mock.MockEngine
@@ -139,91 +137,52 @@ class GitHubClientTest {
     }
 
     @Test
-    fun deviceCodeRequestIsParsed() = runTest {
-        val body = """
-            {"device_code":"abc","user_code":"WDJB-MJHT","verification_uri":"https://github.com/login/device",
-             "expires_in":900,"interval":5}
-        """.trimIndent()
-        val flow = DeviceFlowClient("client", jsonEngine(body = body))
-        val code = flow.requestCode()
-        assertEquals("WDJB-MJHT", code.userCode)
-        assertEquals(900, code.expiresIn)
-        flow.close()
-    }
-
-    @Test
-    fun devicePollPendingThenGranted() = runTest {
-        var calls = 0
-        val engine = MockEngine {
-            calls++
-            val body = if (calls == 1) {
-                """{"error":"authorization_pending"}"""
-            } else {
-                """{"access_token":"gho_real","token_type":"bearer","scope":"repo,workflow"}"""
-            }
-            respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }
-        val flow = DeviceFlowClient("client", engine)
-        assertEquals(DevicePoll.Pending, flow.pollOnce("abc"))
-        val granted = flow.pollOnce("abc")
-        assertTrue(granted is DevicePoll.Granted)
-        assertEquals("gho_real", granted.token)
-        assertEquals(listOf("repo", "workflow"), granted.scopes)
-        flow.close()
-    }
-
-    @Test
-    fun devicePollSlowDownRaisesInterval() = runTest {
-        val flow = DeviceFlowClient("client", jsonEngine(body = """{"error":"slow_down"}"""))
-        val result = flow.pollOnce("abc")
-        assertTrue(result is DevicePoll.SlowDown)
-        assertEquals(10, result.newInterval)
-        flow.close()
-    }
-
-    @Test
-    fun devicePollDenialIsTerminal() = runTest {
-        val flow = DeviceFlowClient("client", jsonEngine(body = """{"error":"access_denied"}"""))
-        val result = flow.pollOnce("abc")
-        assertTrue(result is DevicePoll.Failed)
-        assertEquals("access_denied", result.reason)
-        flow.close()
-    }
-
-    @Test
-    fun devicePollExpiryIsTerminal() = runTest {
-        val flow = DeviceFlowClient("client", jsonEngine(body = """{"error":"expired_token"}"""))
-        val result = flow.pollOnce("abc")
-        assertTrue(result is DevicePoll.Failed)
-        assertEquals("expired_token", result.reason)
-        flow.close()
-    }
-
-    @Test
-    fun deviceCodeIsSentFormEncoded() = runTest {
-        var sentType: String? = null
-        var sentBody = ""
+    fun createRepositoryRequestsPublicByDefault() = runTest {
+        var sent = ""
         val engine = MockEngine { req ->
-            sentType = req.body.contentType?.toString()
-            sentBody = (req.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            sent = (req.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().decodeToString()
             respond(
-                ByteReadChannel("""{"device_code":"d","user_code":"AB-CD","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"""),
-                HttpStatusCode.OK,
+                ByteReadChannel("""{"name":"sessions","full_name":"owner/sessions","private":false,"default_branch":"main"}"""),
+                HttpStatusCode.Created,
                 headersOf(HttpHeaders.ContentType, "application/json"),
             )
         }
-        val flow = DeviceFlowClient("Ov23abc", engine)
-        flow.requestCode()
-        assertTrue(sentType!!.startsWith("application/x-www-form-urlencoded"))
-        assertTrue(sentBody.contains("client_id=Ov23abc"))
-        flow.close()
+        val client = GitHubClient("token", engine)
+        val repo = client.createRepository("sessions", "RemoteHub temporary Windows sessions")
+        assertEquals("owner/sessions", repo.fullName)
+        assertTrue(sent.contains("\"private\":false"))
+        assertTrue(!sent.contains("hetzner"))
+        client.close()
     }
 
     @Test
-    fun deviceFlowDisabledIsReported() = runTest {
-        val flow = DeviceFlowClient("client", jsonEngine(body = """{"error":"device_flow_disabled"}"""))
-        val error = assertFailsWith<GitHubException> { flow.requestCode() }
-        assertEquals("device_flow_disabled", error.message)
-        flow.close()
+    fun createRepositoryCanStayPrivate() = runTest {
+        var sent = ""
+        val engine = MockEngine { req ->
+            sent = (req.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond(
+                ByteReadChannel("""{"name":"sessions","full_name":"owner/sessions","private":true,"default_branch":"main"}"""),
+                HttpStatusCode.Created,
+                headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val client = GitHubClient("token", engine)
+        assertTrue(client.createRepository("sessions", "d", private = true).private)
+        assertTrue(sent.contains("\"private\":true"))
+        client.close()
+    }
+
+    @Test
+    fun workflowStepTimestampsAreParsed() = runTest {
+        val body = """
+            {"jobs":[{"id":7,"name":"Windows session","status":"in_progress","conclusion":null,
+              "steps":[{"name":"5. Join the private network","status":"completed","conclusion":"success","number":5,
+                        "started_at":"2026-11-27T10:00:00Z","completed_at":"2026-11-27T10:00:42Z"}]}]}
+        """.trimIndent()
+        val client = GitHubClient("token", jsonEngine(body = body))
+        val step = client.jobs("owner", "sessions", 42)[0].steps[0]
+        assertEquals("2026-11-27T10:00:00Z", step.startedAt)
+        assertEquals("2026-11-27T10:00:42Z", step.completedAt)
+        client.close()
     }
 }

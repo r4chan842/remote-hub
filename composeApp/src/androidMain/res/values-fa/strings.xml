@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RemoteHub</string>
+    <string name="session_channel">نشست ریموت</string>
+    <string name="session_running">نشست ریموت فعال است</string>
+    <string name="expiry_title">نشست رو به پایان است</string>
+    <string name="err_token_empty">اول توکن گیت‌هاب را بچسبان.</string>
+    <string name="err_token_invalid">این توکن معتبر نیست. با لینک بالا یکی تازه بساز.</string>
+    <string name="err_scopes">مجوز repo و workflow لازم است. توکن را با لینک بالا دوباره بساز.</string>
+    <string name="err_key_empty">کلید Tailscale را وارد کن.</string>
+    <string name="err_network">اتصال به شبکه خصوصی ممکن نشد. کلید و اینترنت را بررسی کن.</string>
+    <string name="err_github_first">اول حساب گیت‌هاب را وصل کن.</string>
+    <string name="err_name_empty">برای سرور یک نام بگذار.</string>
+    <string name="err_provision">ساخت ناموفق بود. دوباره تلاش کن.</string>
+    <string name="err_no_address">آدرس سرور هنوز روی شبکه خصوصی پیدا نشده.</string>
+    <string name="err_network_first">اول شبکه خصوصی را وصل کن.</string>
+    <string name="err_rdp">اتصال ریموت دسکتاپ ناموفق بود.</string>
+    <string name="err_clipboard_empty">کلیپ‌بورد خالی است.</string>
+    <string name="err_backup">بکاپ ناموفق بود.</string>
+    <string name="clipboard_sent">کلیپ‌بورد به سرور فرستاده شد.</string>
+    <string name="clipboard_pending">کانال کلیپ‌بورد هنوز آماده نیست.</string>
+    <string name="backup_stored">بکاپ رمزنگاری‌شده در ریپوی تو ذخیره شد.</string>
+</resources>

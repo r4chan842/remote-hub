@@ -75,8 +75,6 @@ android {
         versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("appVersionName") as String?) ?: "0.1.0"
         // Optional built-in GitHub OAuth App (Device Flow enabled). Empty = PAT sign-in is the default.
-        val ghClientId = (project.findProperty("githubClientId") as String?) ?: System.getenv("RH_GITHUB_CLIENT_ID") ?: ""
-        buildConfigField("String", "GITHUB_CLIENT_ID", "\"${ghClientId.trim()}\"")
         // ABI selection lives in `splits.abi` below (AGP rejects ndk.abiFilters together
         // with ABI splits). Other ABIs coming from dependencies are dropped in `packaging`.
     }

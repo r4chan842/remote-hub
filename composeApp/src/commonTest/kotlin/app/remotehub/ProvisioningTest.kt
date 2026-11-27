@@ -4,6 +4,7 @@ import app.remotehub.domain.StepStatus
 import app.remotehub.i18n.English
 import app.remotehub.i18n.Persian
 import app.remotehub.ui.formatMillis
+import app.remotehub.ui.provisionStepIds
 import app.remotehub.ui.stepTitle
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -11,7 +12,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ProvisioningTest {
-    private val stepIds = listOf("account", "repo", "secrets", "dispatch", "runner", "join", "handshake", "ready")
+    private val stepIds = provisionStepIds
 
     @Test
     fun everyProvisionStepHasDistinctLocalizedTitle() {

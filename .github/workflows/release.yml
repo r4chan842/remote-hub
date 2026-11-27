@@ -148,7 +148,6 @@ jobs:
 
       - name: Build signed per-ABI APKs
         env:
-          RH_GITHUB_CLIENT_ID: ${{ vars.RH_GITHUB_CLIENT_ID }}
         run: >
           gradle --no-daemon :composeApp:assembleRelease
           -PappVersionCode=${{ needs.gate.outputs.version_code }}

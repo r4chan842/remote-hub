@@ -1,8 +1,19 @@
 package app.remotehub
 
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -10,312 +21,205 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.CancellationException
-import app.remotehub.data.StoreKeys
-import app.remotehub.domain.GitHubAccount
-import app.remotehub.github.DeviceFlowClient
-import app.remotehub.github.DevicePoll
-import app.remotehub.github.GitHubClient
+import app.remotehub.app.AppScreen
+import app.remotehub.app.AppState
+import app.remotehub.app.CreateForm
 import app.remotehub.design.RemoteHubTheme
 import app.remotehub.domain.AuthMethod
-import app.remotehub.domain.DeviceFlowPhase
-import app.remotehub.domain.DeviceFlowState
+import app.remotehub.domain.ConnectionInfo
+import app.remotehub.domain.GitHubAccount
 import app.remotehub.domain.NetworkState
-import app.remotehub.domain.QuotaSnapshot
+import app.remotehub.domain.ProvisionStep
+import app.remotehub.domain.ServerSession
+import app.remotehub.domain.ServerSpec
+import app.remotehub.domain.ServerState
+import app.remotehub.domain.StepStatus
 import app.remotehub.domain.TailnetStatus
 import app.remotehub.i18n.LocalStrings
+import app.remotehub.i18n.availableLocales
 import app.remotehub.i18n.stringsFor
 import app.remotehub.ui.AppShell
-import app.remotehub.ui.CreateForm
-import app.remotehub.ui.CreateServerContent
-import app.remotehub.ui.DashboardContent
+import app.remotehub.ui.BackIcon
+import app.remotehub.ui.CreateContent
 import app.remotehub.ui.Destination
-import app.remotehub.ui.GitHubAuthContent
-import app.remotehub.ui.NetworkContent
-import app.remotehub.ui.NewServerFab
+import app.remotehub.ui.GuideContent
+import app.remotehub.ui.ProgressContent
+import app.remotehub.ui.RemoteContent
+import app.remotehub.ui.RemoteMetrics
+import app.remotehub.ui.SessionDetailContent
 import app.remotehub.ui.SettingsContent
+import app.remotehub.ui.SetupContent
 
+/**
+ * Desktop is a design bench, not a shipping target: it shows the real Compose screens
+ * so the layout can be reviewed in every locale and theme. Provisioning, the private
+ * network and the remote desktop only run in the Android app.
+ */
 @Composable
 fun RemoteHubApp() {
-    var destination by remember { mutableStateOf(Destination.Dashboard) }
-    var creating by remember { mutableStateOf(false) }
-    var themeMode by remember { mutableStateOf(0) }
+    var screen by remember { mutableStateOf(AppScreen.Setup) }
+    var themeMode by remember { mutableStateOf(2) }
     var localeTag by remember { mutableStateOf("fa") }
-    var authMethod by remember { mutableStateOf(AuthMethod.DeviceFlow) }
-    var patInput by remember { mutableStateOf("") }
-    val store = remember { app.remotehub.data.createSecureStore() }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    var account by remember {
-        mutableStateOf(
-            store.get(app.remotehub.data.StoreKeys.GITHUB_LOGIN)?.let {
-                GitHubAccount(it, it, AuthMethod.entries.firstOrNull { method -> method.name == store.get(StoreKeys.GITHUB_METHOD) } ?: AuthMethod.PersonalAccessToken, emptyList(), emptyList(), "")
-            },
-        )
-    }
-    var authBusy by remember { mutableStateOf(false) }
-    var authError by remember { mutableStateOf<String?>(null) }
-    val idleDeviceFlow = DeviceFlowState(DeviceFlowPhase.Idle, "", DeviceFlowClient.GITHUB_DEVICE_URL, 0, 5)
-    var deviceFlow by remember { mutableStateOf(idleDeviceFlow) }
-    var deviceJob by remember { mutableStateOf<Job?>(null) }
-    var clientIdInput by remember { mutableStateOf(store.get(StoreKeys.GITHUB_CLIENT_ID).orEmpty()) }
-
-    suspend fun validateSignIn(token: String, method: AuthMethod) {
-        val client = GitHubClient(token)
-        try {
-            val result = client.validate()
-            store.put(StoreKeys.GITHUB_TOKEN, token)
-            store.put(StoreKeys.GITHUB_LOGIN, result.user.login)
-            store.put(StoreKeys.GITHUB_METHOD, method.name)
-            account = GitHubAccount(result.user.login, result.user.name ?: result.user.login, method, result.scopes, result.missing, "")
-            patInput = ""
-        } finally {
-            client.close()
-        }
-    }
-
-    fun startDeviceSignIn() {
-        if (deviceJob?.isActive == true) return
-        val clientId = clientIdInput.trim().ifBlank { System.getenv("RH_GITHUB_CLIENT_ID").orEmpty().trim() }
-        if (clientId.isBlank()) {
-            authError = "Enter an OAuth Client ID with Device Flow enabled, or use a personal access token."
-            return
-        }
-        authBusy = true
-        authError = null
-        deviceJob = scope.launch {
-            val client = DeviceFlowClient(clientId)
-            try {
-                val code = client.requestCode()
-                deviceFlow = DeviceFlowState(DeviceFlowPhase.WaitingForApproval, code.userCode, DeviceFlowClient.GITHUB_DEVICE_URL, code.expiresIn, code.interval)
-                authBusy = false
-                when (val result = client.awaitToken(code) { remaining -> deviceFlow = deviceFlow.copy(secondsRemaining = remaining) }) {
-                    is DevicePoll.Granted -> {
-                        authBusy = true
-                        validateSignIn(result.token, AuthMethod.DeviceFlow)
-                        deviceFlow = idleDeviceFlow
-                    }
-                    is DevicePoll.Failed -> {
-                        deviceFlow = idleDeviceFlow
-                        authError = result.reason
-                    }
-                    else -> Unit
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                deviceFlow = idleDeviceFlow
-                authError = error.message ?: "Could not sign in to GitHub."
-            } finally {
-                authBusy = false
-                client.close()
-            }
-        }
-    }
-    var authKeyInput by remember { mutableStateOf("") }
-    var expiryAlert by remember { mutableStateOf(true) }
-    var biometric by remember { mutableStateOf(false) }
-    var form by remember {
-        mutableStateOf(
-            CreateForm(
-                name = "",
-                provider = "",
-                region = "",
-                osImage = "",
-                machineSize = "",
-                warningMinutes = 15,
-                autoBackup = true,
-                encryptedBackup = true,
-            ),
-        )
-    }
-    var wizardStep by remember { mutableStateOf(0) }
+    var connected by remember { mutableStateOf(false) }
+    var form by remember { mutableStateOf(CreateForm(name = "windows-desktop", durationMinutes = 360)) }
 
     val strings = stringsFor(localeTag)
-    val darkTheme = themeMode == 2
+    val account = GitHubAccount("preview-user", "preview-user", AuthMethod.PersonalAccessToken, listOf("repo", "workflow"), emptyList(), "")
+    val tailnet = TailnetStatus(
+        state = if (connected) NetworkState.Online else NetworkState.Offline,
+        tailnetName = "tailnet-preview",
+        nodeName = "remotehub-phone",
+        nodeAddress = if (connected) "100.94.12.7" else "",
+        relayLabel = "DERP · fra",
+        latencyMillis = 38,
+        transportLabel = "userspace",
+        lastError = null,
+    )
+    val server = ServerSession(
+        id = "windows-preview",
+        name = form.name.ifBlank { "windows-desktop" },
+        state = ServerState.Ready,
+        spec = ServerSpec(4, 16, 14, "Windows Server 2025 Datacenter", "github-runner", "GitHub Actions"),
+        connection = ConnectionInfo("100.94.12.41", 3389, "rhuser", "preview-password", ""),
+        steps = emptyList(),
+        uptimeLabel = "1h 04m",
+        remainingLabel = "04:56:00",
+        remainingFraction = 0.82f,
+        warningThresholdMinutes = 15,
+        workflowRunNumber = 1,
+        workflowRunUrl = "https://github.com",
+        repositoryFullName = "preview-user/remote-hub-sessions",
+        operations = emptyList(),
+        backups = emptyList(),
+        lastError = null,
+        runId = 1,
+        durationMinutes = form.durationMinutes,
+    )
+    val state = AppState(
+        screen = screen,
+        account = if (connected) account else null,
+        tailnet = tailnet,
+        form = form,
+        provisioning = screen == AppScreen.Progress,
+        steps = listOf(
+            ProvisionStep("account", StepStatus.Done, "@preview-user", 1200),
+            ProvisionStep("repo", StepStatus.Done, "preview-user/remote-hub-sessions", 2400),
+            ProvisionStep("secrets", StepStatus.Done, "3 secrets", 1800),
+            ProvisionStep("dispatch", StepStatus.Done, "run #1", 900),
+            ProvisionStep("machine", StepStatus.Running, "2. Enable Remote Desktop", null),
+            ProvisionStep("network", StepStatus.Pending, null, null),
+            ProvisionStep("ready", StepStatus.Pending, null, null),
+        ),
+        servers = listOf(server),
+        activeServerId = server.id,
+        themeMode = themeMode,
+        localeTag = localeTag,
+    )
 
-    RemoteHubTheme(darkTheme = darkTheme) {
+    RemoteHubTheme(darkTheme = themeMode == 2) {
         CompositionLocalProvider(
             LocalStrings provides strings,
             LocalLayoutDirection provides if (strings.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
         ) {
-            val tailnet = TailnetStatus(
-                state = NetworkState.Offline,
-                tailnetName = "—",
-                nodeName = "—",
-                nodeAddress = "—",
-                relayLabel = "—",
-                latencyMillis = 0,
-                transportLabel = "—",
-                lastError = null,
-            )
-            val quota = QuotaSnapshot(0, 2000, 0, 20, "6h")
-
-            val title = when {
-                creating -> strings.createTitle
-                destination == Destination.Dashboard -> strings.navDashboard
-                destination == Destination.Servers -> strings.navServers
-                destination == Destination.Network -> strings.navNetwork
-                else -> strings.navSettings
-            }
-
-            AppShell(
-                selected = destination,
-                onSelect = {
-                    destination = it
-                    creating = false
-                },
-                expanded = true,
-                title = title,
-                floatingAction = {
-                    if (destination == Destination.Dashboard && !creating) {
-                        NewServerFab(onClick = { creating = true }, extended = true)
+            Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                Column(
+                    Modifier.width(220.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .verticalScroll(rememberScrollState()).padding(12.dp),
+                ) {
+                    Text(strings.appName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text("design bench", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    AppScreen.entries.forEach { entry ->
+                        TextButton(onClick = { screen = entry }, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                entry.name,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (entry == screen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                },
-            ) { padding ->
-                val contentModifier = Modifier.padding(padding).padding(vertical = 4.dp)
-                when {
-                    creating -> CreateServerContent(
-                        form = form,
-                        wizardStep = wizardStep,
-                        provisioning = false,
-                        steps = emptyList(),
-                        repositoryFullName = "—",
-                        onNameChange = { form = form.copy(name = it) },
-                        onWarningChange = { form = form.copy(warningMinutes = it) },
-                        onAutoBackupChange = { form = form.copy(autoBackup = it) },
-                        onBack = { if (wizardStep > 0) wizardStep-- else creating = false },
-                        onNext = { wizardStep++ },
-                        onCreate = {},
-                        onCancel = { creating = false },
-                        modifier = contentModifier,
-                    )
-                    destination == Destination.Dashboard -> DashboardContent(
-                        account = null,
-                        tailnet = tailnet,
-                        providerReady = false,
-                        servers = emptyList(),
-                        quota = quota,
-                        expanded = true,
-                        onOpenSetup = { destination = Destination.Servers },
-                        onOpenServer = {},
-                        onConnect = {},
-                        onCreate = { creating = true },
-                        modifier = contentModifier,
-                    )
-                    destination == Destination.Servers -> GitHubAuthContent(
-                        account = account,
-                        method = authMethod,
-                        deviceFlow = deviceFlow,
-                        patInput = patInput,
-                        clientIdInput = clientIdInput,
-                        onClientIdChange = {
-                            clientIdInput = it
-                            store.put(StoreKeys.GITHUB_CLIENT_ID, it.trim())
-                        },
-                        requiredScopes = GitHubClient.REQUIRED_SCOPES,
-                        onMethodChange = {
-                            if (it != authMethod && !authBusy) {
-                                deviceJob?.cancel()
-                                deviceFlow = idleDeviceFlow
-                                authError = null
-                                authMethod = it
+                    availableLocales.forEach { (tag, name) ->
+                        TextButton(onClick = { localeTag = tag }, modifier = Modifier.fillMaxWidth()) {
+                            Text(name, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                    TextButton(onClick = { themeMode = if (themeMode == 2) 1 else 2 }, modifier = Modifier.fillMaxWidth()) {
+                        Text(strings.theme, style = MaterialTheme.typography.labelMedium)
+                    }
+                    TextButton(onClick = { connected = !connected }, modifier = Modifier.fillMaxWidth()) {
+                        Text(strings.connected, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    if (screen == AppScreen.Remote) {
+                        RemoteContent(
+                            server = server.copy(state = ServerState.Connected),
+                            metrics = RemoteMetrics(30, 38, 2400, "1600 × 900", true, true),
+                            onDisconnect = { screen = AppScreen.Detail },
+                            onKeyboard = {},
+                            onClipboard = {},
+                            onCtrlAltDel = {},
+                            onToggleInputMode = {},
+                            onFullscreen = { screen = AppScreen.Detail },
+                            desktopSurface = { Box(Modifier.fillMaxSize().background(Color(0xFF10233F))) },
+                        )
+                    } else {
+                        AppShell(
+                            selected = Destination.Dashboard,
+                            onSelect = {},
+                            expanded = false,
+                            title = when (screen) {
+                                AppScreen.Setup -> strings.setupTitle
+                                AppScreen.Create -> strings.createTitle
+                                AppScreen.Progress -> strings.progressTitle
+                                AppScreen.Detail -> server.name
+                                AppScreen.Settings -> strings.settingsTitle
+                                AppScreen.Guide -> strings.guides
+                                AppScreen.Remote -> strings.remoteDesktop
+                            },
+                            navigationIcon = if (screen == AppScreen.Setup) null else { { BackIcon(onClick = { screen = AppScreen.Setup }) } },
+                        ) { padding ->
+                            val m = Modifier.padding(padding)
+                            when (screen) {
+                                AppScreen.Setup -> SetupContent(
+                                    state, {}, {}, {}, {}, {},
+                                    { screen = AppScreen.Create },
+                                    { screen = AppScreen.Detail },
+                                    { connected = false }, { connected = false }, m,
+                                )
+                                AppScreen.Create -> CreateContent(
+                                    state,
+                                    { form = form.copy(name = it) },
+                                    { form = form.copy(durationMinutes = it) },
+                                    { screen = AppScreen.Progress },
+                                    { screen = AppScreen.Setup },
+                                    m,
+                                )
+                                AppScreen.Progress -> ProgressContent(state, {}, { screen = AppScreen.Setup }, { screen = AppScreen.Detail }, m)
+                                AppScreen.Detail -> SessionDetailContent(
+                                    server, false, false, null, {}, { _, _ -> },
+                                    { screen = AppScreen.Remote }, {}, {}, {}, {}, m,
+                                )
+                                AppScreen.Settings -> SettingsContent(
+                                    themeMode, localeTag, true, 15,
+                                    { themeMode = it }, { localeTag = it }, {}, {},
+                                    { screen = AppScreen.Guide }, m,
+                                )
+                                AppScreen.Guide -> GuideContent("github", m)
+                                AppScreen.Remote -> Unit
                             }
-                        },
-                        onPatChange = { patInput = it },
-                        onCopyCode = {
-                            runCatching {
-                                java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(java.awt.datatransfer.StringSelection(deviceFlow.userCode), null)
-                            }.onFailure { authError = "Could not copy the device code." }
-                        },
-                        onOpenGitHub = {
-                            if (deviceFlow.userCode.isBlank()) startDeviceSignIn()
-                            else openInBrowser(DeviceFlowClient.GITHUB_DEVICE_URL)
-                        },
-                        onCreateToken = { openInBrowser("https://github.com/settings/tokens/new?scopes=repo,workflow&description=RemoteHub") },
-                        onValidatePat = {
-                            val token = patInput.trim()
-                            authBusy = true
-                            authError = null
-                            scope.launch {
-                                try {
-                                    validateSignIn(token, AuthMethod.PersonalAccessToken)
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (error: Exception) {
-                                    authError = error.message ?: "Could not sign in to GitHub."
-                                } finally {
-                                    authBusy = false
-                                }
-                            }
-                        },
-                        onDisconnect = {
-                            store.remove(app.remotehub.data.StoreKeys.GITHUB_TOKEN)
-                            store.remove(app.remotehub.data.StoreKeys.GITHUB_LOGIN)
-                            store.remove(StoreKeys.GITHUB_METHOD)
-                            account = null
-                        },
-                        error = authError,
-                        busy = authBusy,
-                        modifier = contentModifier,
-                    )
-                    destination == Destination.Network -> NetworkContent(
-                        status = tailnet,
-                        authKeyInput = authKeyInput,
-                        onAuthKeyChange = { authKeyInput = it },
-                        onConnect = {},
-                        onDisconnect = {},
-                        onOfficialSignIn = {},
-                        modifier = contentModifier,
-                    )
-                    else -> SettingsContent(
-                        themeMode = themeMode,
-                        localeTag = localeTag,
-                        expiryAlertEnabled = expiryAlert,
-                        alertThresholdMinutes = form.warningMinutes,
-                        biometricEnabled = biometric,
-                        storageEncrypted = true,
-                        appVersion = "0.1.0",
-                        onThemeChange = { themeMode = it },
-                        onLocaleChange = { localeTag = it },
-                        onExpiryAlertChange = { expiryAlert = it },
-                        onBiometricChange = { biometric = it },
-                        onClearCredentials = {
-                            patInput = ""
-                            authKeyInput = ""
-                        },
-                        onOpenGuide = { openInBrowser("https://github.com/r4chan842/remote-hub#readme") },
-                        modifier = contentModifier,
-                    )
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
-/** Opens a URL in the system browser; falls back to the OS opener when AWT Desktop is unavailable. */
-fun openInBrowser(url: String) {
-    val ok = runCatching {
-        val d = java.awt.Desktop.getDesktop()
-        if (java.awt.Desktop.isDesktopSupported() && d.isSupported(java.awt.Desktop.Action.BROWSE)) {
-            d.browse(java.net.URI(url)); true
-        } else false
-    }.getOrDefault(false)
-    if (!ok) {
-        val os = System.getProperty("os.name").lowercase()
-        val cmd = when {
-            os.contains("win") -> listOf("rundll32", "url.dll,FileProtocolHandler", url)
-            os.contains("mac") -> listOf("open", url)
-            else -> listOf("xdg-open", url)
-        }
-        runCatching { ProcessBuilder(cmd).start() }
     }
 }
 
@@ -324,7 +228,7 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             state = rememberWindowState(width = 1280.dp, height = 880.dp),
-            title = "RemoteHub",
+            title = "RemoteHub · design bench",
         ) {
             RemoteHubApp()
         }

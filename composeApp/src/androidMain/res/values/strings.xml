@@ -4,4 +4,20 @@
     <string name="session_channel">Remote session</string>
     <string name="session_running">Remote session active</string>
     <string name="expiry_title">Session ending soon</string>
+    <string name="err_token_empty">Paste your GitHub token first.</string>
+    <string name="err_token_invalid">That token is not valid. Create a new one with the link above.</string>
+    <string name="err_scopes">The repo and workflow permissions are required. Create the token again with the link above.</string>
+    <string name="err_key_empty">Enter your Tailscale auth key.</string>
+    <string name="err_network">Could not join the private network. Check the key and your connection.</string>
+    <string name="err_github_first">Connect your GitHub account first.</string>
+    <string name="err_name_empty">Give the server a name.</string>
+    <string name="err_provision">Setup failed. Try again.</string>
+    <string name="err_no_address">The server address was not found on the private network yet.</string>
+    <string name="err_network_first">Connect the private network first.</string>
+    <string name="err_rdp">Remote desktop connection failed.</string>
+    <string name="err_clipboard_empty">The clipboard is empty.</string>
+    <string name="err_backup">Backup failed.</string>
+    <string name="clipboard_sent">Clipboard sent to the server.</string>
+    <string name="clipboard_pending">The clipboard channel is not ready yet.</string>
+    <string name="backup_stored">Encrypted backup saved to your repository.</string>
 </resources>

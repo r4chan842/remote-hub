@@ -16,5 +16,11 @@ fun randomPassword(length: Int = 20): String {
     return bytes.joinToString("") { pool[(it.toInt() and 0xFF) % pool.length].toString() }
 }
 
+/** Lowercase letters and digits only: safe inside a workflow input and a hostname. */
+fun randomSlug(length: Int): String {
+    val pool = "abcdefghijklmnopqrstuvwxyz0123456789"
+    return randomBytes(length).joinToString("") { pool[(it.toInt() and 0xFF) % pool.length].toString() }
+}
+
 fun bytesToHex(bytes: ByteArray): String =
     bytes.joinToString("") { ((it.toInt() and 0xFF) + 0x100).toString(16).substring(1) }

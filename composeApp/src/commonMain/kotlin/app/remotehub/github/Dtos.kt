@@ -92,6 +92,8 @@ data class WorkflowStep(
     val status: String,
     val conclusion: String? = null,
     val number: Int = 0,
+    @SerialName("started_at") val startedAt: String? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
 )
 
 @Serializable

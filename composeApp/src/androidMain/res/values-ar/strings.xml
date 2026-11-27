@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RemoteHub</string>
+    <string name="session_channel">جلسة بعيدة</string>
+    <string name="session_running">الجلسة البعيدة نشطة</string>
+    <string name="expiry_title">الجلسة على وشك الانتهاء</string>
+    <string name="err_token_empty">الصق رمز GitHub أولاً.</string>
+    <string name="err_token_invalid">هذا الرمز غير صالح. أنشئ رمزاً جديداً من الرابط أعلاه.</string>
+    <string name="err_scopes">صلاحيتا repo و workflow مطلوبة. أنشئ الرمز مجدداً من الرابط أعلاه.</string>
+    <string name="err_key_empty">أدخل مفتاح Tailscale.</string>
+    <string name="err_network">تعذر الاتصال بالشبكة الخاصة. تحقق من المفتاح والاتصال.</string>
+    <string name="err_github_first">اربط حساب GitHub أولاً.</string>
+    <string name="err_name_empty">أعطِ الخادم اسماً.</string>
+    <string name="err_provision">فشل الإعداد. حاول مجدداً.</string>
+    <string name="err_no_address">لم يُعثر على عنوان الخادم في الشبكة الخاصة بعد.</string>
+    <string name="err_network_first">اتصل بالشبكة الخاصة أولاً.</string>
+    <string name="err_rdp">فشل اتصال سطح المكتب البعيد.</string>
+    <string name="err_clipboard_empty">الحافظة فارغة.</string>
+    <string name="err_backup">فشل النسخ الاحتياطي.</string>
+    <string name="clipboard_sent">أُرسلت الحافظة إلى الخادم.</string>
+    <string name="clipboard_pending">قناة الحافظة غير جاهزة بعد.</string>
+    <string name="backup_stored">حُفظ نسخة احتياطية مشفرة في مستودعك.</string>
+</resources>
