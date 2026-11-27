@@ -386,14 +386,11 @@ static BOOL rh_end_paint(rdpContext* context)
 
 	/* Only the invalidated rectangle changed. Copying the whole desktop here
 	 * cost two full-frame memcpys per frame at 1600x900. */
-	INT32 ix0 = hwnd->invalid->left;
-	INT32 iy0 = hwnd->invalid->top;
-	INT32 ix1 = hwnd->invalid->right;
-	INT32 iy1 = hwnd->invalid->bottom;
-	if (ix0 < 0)
-		ix0 = 0;
-	if (iy0 < 0)
-		iy0 = 0;
+	/* GDI_RGN stores origin plus extent (x, y, w, h), not a corner pair. */
+	const INT32 ix0 = hwnd->invalid->x > 0 ? hwnd->invalid->x : 0;
+	const INT32 iy0 = hwnd->invalid->y > 0 ? hwnd->invalid->y : 0;
+	const INT32 ix1 = hwnd->invalid->x + hwnd->invalid->w;
+	const INT32 iy1 = hwnd->invalid->y + hwnd->invalid->h;
 
 	pthread_mutex_lock(&rh->lock);
 	rh_blit_locked(rh, gdi, (UINT32)ix0, (UINT32)iy0, ix1 > 0 ? (UINT32)ix1 : 0,
