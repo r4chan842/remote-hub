@@ -111,12 +111,12 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
     suspend fun probe(host: String, port: Int, timeoutMillis: Int = 6000): Boolean =
         withContext(Dispatchers.IO) {
             val current = node ?: return@withContext false
-            runCatching { current.probe("$host:$port", timeoutMillis) }.isSuccess
+            runCatching { current.probe("$host:$port", timeoutMillis.toLong()) }.isSuccess
         }
 
     suspend fun latency(host: String, port: Int, timeoutMillis: Int = 6000): Int =
         withContext(Dispatchers.IO) {
-            node?.latencyMillis("$host:$port", timeoutMillis) ?: -1
+            node?.latencyMillis("$host:$port", timeoutMillis.toLong())?.toInt() ?: -1
         }
 
     fun startPolling(intervalMillis: Long = 4000, onStatus: (NodeStatus) -> Unit) {

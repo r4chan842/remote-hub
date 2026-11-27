@@ -11,6 +11,7 @@ expect fun createSecureStore(): SecureStore
 
 object StoreKeys {
     const val GITHUB_TOKEN = "github.token"
+    const val GITHUB_CLIENT_ID = "github.clientid"
     const val GITHUB_LOGIN = "github.login"
     const val GITHUB_METHOD = "github.method"
     const val GITHUB_SCOPES = "github.scopes"
