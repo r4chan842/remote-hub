@@ -7,34 +7,39 @@ set -euo pipefail
 API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
 mkdir -p composeApp/libs composeApp/src/androidMain/jniLibs/arm64-v8a composeApp/src/androidMain/jniLibs/armeabi-v7a
 
-latest_run() {
-  curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-    "${API}/actions/workflows/native.yml/runs?status=success&per_page=1" \
-    | python3 -c 'import json,sys; runs=json.load(sys.stdin)["workflow_runs"]; print(runs[0]["id"] if runs else "")'
+gh_get() {
+  curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$1"
 }
 
-RUN_ID="$(latest_run)"
-if [ -z "$RUN_ID" ]; then
-  echo "No successful Native Engines run found" >&2
-  exit 1
-fi
-echo "Using native run ${RUN_ID}"
+RUNS="$(gh_get "${API}/actions/workflows/native.yml/runs?per_page=20")"
 
-ARTIFACTS="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-  "${API}/actions/runs/${RUN_ID}/artifacts?per_page=100")"
+find_artifact() {
+  local name="$1"
+  for run_id in $(printf '%s' "$RUNS" | python3 -c 'import json,sys; [print(r["id"]) for r in json.load(sys.stdin)["workflow_runs"]]'); do
+    local artifacts id
+    artifacts="$(gh_get "${API}/actions/runs/${run_id}/artifacts?per_page=100")"
+    id="$(printf '%s' "$artifacts" | python3 -c "
+import json,sys
+data=json.load(sys.stdin)['artifacts']
+print(next((str(a['id']) for a in data if a['name']=='$name' and not a['expired']), ''))
+")"
+    if [ -n "$id" ]; then
+      echo "${run_id}:${id}"
+      return 0
+    fi
+  done
+  return 1
+}
 
 download() {
   local name="$1" dest="$2"
-  local id
-  id="$(printf '%s' "$ARTIFACTS" | python3 -c "
-import json,sys
-data=json.load(sys.stdin)['artifacts']
-print(next((a['id'] for a in data if a['name']=='$name'), ''))
-")"
-  if [ -z "$id" ]; then
-    echo "artifact $name missing" >&2
+  local found run_id id
+  if ! found="$(find_artifact "$name")"; then
+    echo "artifact $name not found in recent native runs" >&2
     return 1
   fi
+  run_id="${found%%:*}"
+  id="${found##*:}"
   mkdir -p "$dest"
   local location
   location="$(curl -sS -o /dev/null -w '%{redirect_url}' \
@@ -43,7 +48,7 @@ print(next((a['id'] for a in data if a['name']=='$name'), ''))
   curl -fsSL -o "${dest}/${name}.zip" "$location"
   unzip -o -q "${dest}/${name}.zip" -d "$dest"
   rm "${dest}/${name}.zip"
-  echo "downloaded $name"
+  echo "downloaded $name from run $run_id"
 }
 
 download tsbridge-aar composeApp/libs

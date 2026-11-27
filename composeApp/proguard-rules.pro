@@ -1,3 +1,5 @@
+-dontobfuscate
+-keep class app.remotehub.BuildConfig { *; }
 -keep class app.remotehub.tsbridge.** { *; }
 -keep class app.remotehub.rdp.NativeRdp { *; }
 -keep interface app.remotehub.rdp.RdpListener { *; }
@@ -22,3 +24,7 @@
 -keepclassmembers class app.remotehub.net.TailnetPeer { *; }
 -keepclassmembers class app.remotehub.net.** { *; }
 -keep,includedescriptorclasses class io.ktor.** { *; }
+-dontwarn com.goterl.**
+-dontwarn com.sun.jna.**
+-keep class com.sun.jna.** { *; }
+-keep class com.goterl.** { *; }

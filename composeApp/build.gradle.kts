@@ -35,7 +35,6 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
-            implementation(libs.androidx.biometric)
             implementation(files("libs/tsbridge.aar"))
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
@@ -54,6 +53,10 @@ kotlin {
             implementation(libs.ktor.client.mock)
             implementation(libs.kotlinx.coroutines.test)
         }
+        getByName("desktopTest").dependencies {
+            implementation(libs.lazysodium.java)
+            implementation(libs.jna)
+        }
     }
 }
 
@@ -66,7 +69,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
-        versionName = (project.findProperty("appVersionName") as String?) ?: "0.1.0"
+        versionName = (project.findProperty("appVersionName") as String?) ?: "1.0.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
