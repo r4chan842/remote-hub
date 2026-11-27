@@ -144,12 +144,12 @@ class Provisioner(
             t = clock.now().toEpochMilliseconds()
             mark(current, StepStatus.Running, SessionWorkflow.FILE_NAME, t, onEvent)
             val before = client.latestDispatchRun(owner, request.repositoryName)?.id ?: 0L
-            client.dispatch(
-                owner,
-                request.repositoryName,
-                SessionWorkflow.FILE_NAME,
-                repo.defaultBranch,
-                mapOf("session_id" to sessionId, "minutes" to minutes.toString()),
+            dispatchWithRetry(
+                owner = owner,
+                repo = request.repositoryName,
+                branch = repo.defaultBranch,
+                inputs = mapOf("session_id" to sessionId, "minutes" to minutes.toString()),
+                onEvent = onEvent,
             )
             val run = awaitNewRun(owner, request.repositoryName, before)
             mark(current, StepStatus.Done, "#${run.runNumber}", t, onEvent)
@@ -193,6 +193,33 @@ class Provisioner(
             onEvent(ProvisionEvent.Failed(current, message))
             throw error
         }
+    }
+
+    /**
+     * A repository that has just received its first workflow file needs a moment before
+     * GitHub will accept a dispatch for it. Retry the two transient answers instead of
+     * failing the whole setup on the very first session.
+     */
+    private suspend fun dispatchWithRetry(
+        owner: String,
+        repo: String,
+        branch: String,
+        inputs: Map<String, String>,
+        onEvent: (ProvisionEvent) -> Unit,
+    ) {
+        var last: GitHubException? = null
+        repeat(8) { attempt ->
+            try {
+                client.dispatch(owner, repo, SessionWorkflow.FILE_NAME, branch, inputs)
+                return
+            } catch (error: GitHubException) {
+                if (error.status != 404 && error.status != 422) throw error
+                last = error
+                onEvent(ProvisionEvent.Log("waiting for GitHub to register the workflow (${attempt + 1}/8)"))
+                delay(6000)
+            }
+        }
+        throw last ?: GitHubException(408, "workflow dispatch was not accepted")
     }
 
     private suspend fun awaitNewRun(owner: String, repo: String, previousId: Long): WorkflowRun {

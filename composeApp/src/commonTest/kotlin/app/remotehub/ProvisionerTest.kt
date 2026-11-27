@@ -246,6 +246,58 @@ class ProvisionerTest {
     }
 
     @Test
+    fun dispatchRetriesWhileGitHubRegistersTheNewWorkflow() = runTest {
+        var dispatched = false
+        var dispatchAttempts = 0
+        val engine = MockEngine { req ->
+            val path = req.url.encodedPath
+            if (path.endsWith("/dispatches")) {
+                dispatchAttempts++
+                if (dispatchAttempts == 1) {
+                    respond(
+                        ByteReadChannel("""{"message":"Workflow does not have workflow_dispatch trigger"}"""),
+                        HttpStatusCode.UnprocessableEntity,
+                        headersOf(HttpHeaders.ContentType, "application/json"),
+                    )
+                    return@MockEngine
+                }
+                dispatched = true
+                respond(ByteReadChannel(""), HttpStatusCode.NoContent, headersOf(HttpHeaders.ContentType, "application/json"))
+                return@MockEngine
+            }
+            val body = when {
+                path == "/user" -> """{"login":"owner"}"""
+                path == "/repos/owner/remote-hub-sessions" -> """{"name":"remote-hub-sessions","full_name":"owner/remote-hub-sessions","default_branch":"main"}"""
+                path.endsWith("/public-key") -> """{"key_id":"kid","key":"aGVsbG8="}"""
+                path.contains("/actions/secrets/") -> ""
+                path.contains("/contents/") && req.method.value == "GET" -> """{"sha":"abc","path":"p"}"""
+                path.contains("/contents/") -> """{"commit":{"sha":"deadbeef"}}"""
+                path.endsWith("/actions/runs") ->
+                    if (dispatched) """{"workflow_runs":[{"id":5,"run_number":1,"status":"in_progress","html_url":"u"}]}"""
+                    else """{"workflow_runs":[]}"""
+                path.endsWith("/actions/runs/5") -> """{"id":5,"run_number":1,"status":"in_progress","conclusion":null,"html_url":"u"}"""
+                path.endsWith("/jobs") ->
+                    """{"jobs":[{"id":1,"name":"Windows session","status":"in_progress","conclusion":null,"steps":[
+                        {"name":"5. Join the private network","status":"completed","conclusion":"success","number":5},
+                        {"name":"6. Publish the endpoint","status":"completed","conclusion":"success","number":6}]}]}"""
+                else -> "{}"
+            }
+            respond(
+                ByteReadChannel(body),
+                HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType to listOf("application/json"), "x-oauth-scopes" to listOf("repo,workflow")),
+            )
+        }
+        val client = GitHubClient("token", engine)
+        val events = mutableListOf<ProvisionEvent>()
+        val outcome = Provisioner(client, RecordingBox(), "owner", "yaml").run(request()) { events.add(it) }
+        assertEquals(2, dispatchAttempts)
+        assertEquals(5L, outcome.runId)
+        assertTrue(events.filterIsInstance<ProvisionEvent.Log>().any { it.line.contains("register the workflow") })
+        client.close()
+    }
+
+    @Test
     fun durationIsClampedToTheJobCeiling() = runTest {
         assertEquals(360, SessionWorkflow.MAX_MINUTES)
         assertEquals(360, SessionWorkflow.DEFAULT_MINUTES)
