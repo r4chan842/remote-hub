@@ -38,8 +38,11 @@ import app.remotehub.ui.CreateContent
 import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
 import app.remotehub.ui.LogsContent
+import app.remotehub.ui.NetworkContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
+import app.remotehub.ui.ServersContent
+import app.remotehub.ui.TailnetDevice
 import app.remotehub.ui.RemoteMetrics
 import app.remotehub.ui.SessionDetailContent
 import app.remotehub.ui.SettingsContent
@@ -186,11 +189,12 @@ private fun ShellFrame(
     title: String,
     subtitle: String? = null,
     back: Boolean = false,
+    destination: Destination = Destination.Dashboard,
     content: @Composable (Modifier) -> Unit,
 ) {
     Frame(strings, dark) {
         AppShell(
-            selected = Destination.Dashboard,
+            selected = destination,
             onSelect = {},
             expanded = expanded,
             title = title,
@@ -252,6 +256,46 @@ private fun screenContent(name: String, strings: AppStrings, variant: Variant): 
                 modifier = m,
             )
         }
+        "10-servers" -> ShellFrame(strings, variant.dark, expanded, strings.serversTitle, destination = Destination.Servers) { m ->
+            ServersContent(
+                servers = listOf(
+                    readyServer.copy(state = ServerState.Connected),
+                    readyServer.copy(id = "s2", name = "Windows 11 · build", state = ServerState.Ready),
+                    readyServer.copy(id = "s3", name = "Windows Server · test", state = ServerState.Stopped),
+                    readyServer.copy(id = "s4", name = "Windows 11 · expired", state = ServerState.Failed),
+                ),
+                padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                onOpen = {}, onConnect = {}, onRestart = {}, onCreate = {},
+                modifier = m,
+            )
+        }
+        "11-network" -> ShellFrame(strings, variant.dark, expanded, strings.networkScreenTitle, destination = Destination.Network) { m ->
+            NetworkContent(
+                tailnet = onlineTailnet,
+                devices = listOf(
+                    TailnetDevice("rh-server-a1b2c3", "100.101.212.73", true),
+                    TailnetDevice("rh-server-d4e5f6", "100.98.44.12", false),
+                ),
+                deviceVpn = true,
+                vpnBusy = false,
+                vpnInterface = "tun0",
+                padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                onToggleVpn = {}, onConnect = {}, onDisconnect = {}, onCopy = { _, _ -> },
+                modifier = m,
+            )
+        }
+        "12-remote-fullscreen" -> Frame(strings, variant.dark) {
+            RemoteContent(
+                server = readyServer.copy(state = ServerState.Connected),
+                metrics = RemoteMetrics(31, 38, 2400, "1600x900", false, false),
+                onDisconnect = {}, onKeyboard = {}, onClipboard = {}, onCtrlAltDel = {},
+                onToggleInputMode = {}, onFullscreen = {},
+                fullscreen = true,
+                connecting = false,
+                hostAspectRatio = 16f / 9f,
+                desktopSurface = { Box(Modifier.fillMaxSize().background(Color(0xFF10233F))) },
+            )
+        }
         else -> error("unknown screen $name")
     }
 }
@@ -292,6 +336,9 @@ fun main(args: Array<String>) {
         "07-settings",
         "08-guide",
         "09-logs",
+        "10-servers",
+        "11-network",
+        "12-remote-fullscreen",
     )
     var count = 0
     for (name in names) {

@@ -153,11 +153,10 @@ fun SetupContent(
                 modifier = Modifier.size(44.dp),
             )
             Column(Modifier.weight(1f)) {
-                Text(s.setupTitle, style = MaterialTheme.typography.titleLarge, color = scheme.onSurface)
+                Text(s.appName, style = MaterialTheme.typography.titleLarge, color = scheme.onSurface)
                 Text(s.brandTagline, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }
-        Text(s.setupSubtitle, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
 
         // ---- item 1: GitHub ----
         Panel(
