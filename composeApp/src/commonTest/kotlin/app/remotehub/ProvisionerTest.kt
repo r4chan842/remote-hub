@@ -84,6 +84,7 @@ class ProvisionerTest {
     @Test
     fun provisionSealsEverySecretWithRepoKey() = runTest {
         val seen = mutableListOf<String>()
+        var dispatched = false
         val engine = MockEngine { req ->
             val path = req.url.encodedPath
             seen.add("${req.method.value} $path")
@@ -97,9 +98,16 @@ class ProvisionerTest {
                 path.contains("/actions/variables") -> ""
                 path.contains("/contents/") && req.method.value == "GET" -> """{"sha":"abc","path":"p"}"""
                 path.contains("/contents/") -> """{"commit":{"sha":"deadbeef"}}"""
-                path.endsWith("/dispatches") -> ""
+                path.endsWith("/dispatches") -> {
+                    dispatched = true
+                    ""
+                }
                 path.endsWith("/actions/runs") ->
-                    """{"workflow_runs":[{"id":99,"run_number":3,"status":"in_progress","html_url":"https://run"}]}"""
+                    if (dispatched) {
+                        """{"workflow_runs":[{"id":99,"run_number":3,"status":"in_progress","html_url":"https://run"}]}"""
+                    } else {
+                        """{"workflow_runs":[]}"""
+                    }
                 path.endsWith("/actions/runs/99") ->
                     """{"id":99,"run_number":3,"status":"completed","conclusion":"success","html_url":"https://run"}"""
                 path.endsWith("/jobs") ->

@@ -22,16 +22,13 @@ class SecretBoxTest {
     private fun KeyPair.publicBase64(): String =
         Base64.getEncoder().encodeToString(publicKey.asBytes)
 
-    private fun KeyPair.secretBase64(): String =
-        Base64.getEncoder().encodeToString(secretKey.asBytes)
-
     @Test
     fun sealedValueOpensWithRecipientSecretKey() {
         val pair = sodium.cryptoBoxKeypair()
         val box = createSecretBox()
         val message = "tskey-auth-kExampleSecretValue123"
         val sealed = box.seal(message, pair.publicBase64())
-        val opened = sodium.cryptoBoxSealOpenEasy(sealed, pair.secretBase64())
+        val opened = sodium.cryptoBoxSealOpenEasy(sealed, pair)
         assertEquals(message, opened)
     }
 
@@ -53,7 +50,7 @@ class SecretBoxTest {
         val box = createSecretBox()
         val message = "گذرواژهٔ فارسی با نویسه‌های خاص !@#"
         val sealed = box.seal(message, pair.publicBase64())
-        assertEquals(message, sodium.cryptoBoxSealOpenEasy(sealed, pair.secretBase64()))
+        assertEquals(message, sodium.cryptoBoxSealOpenEasy(sealed, pair))
     }
 
     @Test
@@ -61,7 +58,7 @@ class SecretBoxTest {
         val pair = sodium.cryptoBoxKeypair()
         val other = sodium.cryptoBoxKeypair()
         val sealed = createSecretBox().seal("secret", pair.publicBase64())
-        val opened = runCatching { sodium.cryptoBoxSealOpenEasy(sealed, other.secretBase64()) }
+        val opened = runCatching { sodium.cryptoBoxSealOpenEasy(sealed, other) }
         assertTrue(opened.isFailure || opened.getOrNull().isNullOrEmpty())
     }
 
@@ -80,6 +77,6 @@ class SecretBoxTest {
         val pair = sodium.cryptoBoxKeypair()
         val message = "x".repeat(4096)
         val sealed = createSecretBox().seal(message, pair.publicBase64())
-        assertEquals(message, sodium.cryptoBoxSealOpenEasy(sealed, pair.secretBase64()))
+        assertEquals(message, sodium.cryptoBoxSealOpenEasy(sealed, pair))
     }
 }
