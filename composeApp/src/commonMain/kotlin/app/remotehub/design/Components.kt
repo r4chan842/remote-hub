@@ -214,7 +214,16 @@ fun StepRow(title: String, status: StepStatus, detail: String?, elapsed: String?
                 color = if (status == StepStatus.Pending) scheme.onSurfaceVariant else scheme.onSurface,
             )
             if (detail != null) {
-                Text(detail, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                val latinOnly = detail.none { it.code in 0x0590..0x08FF }
+                val detailRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        textDirection = if (latinOnly) TextDirection.Ltr else TextDirection.Content,
+                        textAlign = if (latinOnly && detailRtl) TextAlign.Right else TextAlign.Start,
+                    ),
+                    color = scheme.onSurfaceVariant,
+                )
             }
         }
         val trailing = elapsed ?: when (status) {
