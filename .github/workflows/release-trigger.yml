@@ -1,0 +1,63 @@
+# Release trigger for maintainers: a push that touches this file points the release tag at
+# the tested main commit and asks the Release workflow to publish it. The Release workflow
+# still runs every gate (tests, lint, signing key, certificate pin, versionCode).
+# Publishing an existing tag is refused there, so this cannot overwrite a release.
+name: Release trigger
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-trigger.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (must match vMAJOR.MINOR.PATCH)"
+        required: true
+        default: "v1.0.1"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release-trigger
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: ${{ inputs.tag || 'v1.0.1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Point the tag at this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+              -F sha="${SHA}" -F force=true >/dev/null
+            echo "moved ${TAG} to ${SHA}"
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="${SHA}" >/dev/null
+            echo "created ${TAG} at ${SHA}"
+          fi
+
+      - name: Dispatch the Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref main -f tag="${TAG}" -f dry_run=false
+          sleep 10
+          gh run list --workflow release.yml --limit 3 \
+            --json databaseId,status,headSha,createdAt \
+            --jq '.[] | "\(.databaseId) \(.status) \(.headSha) \(.createdAt)"'

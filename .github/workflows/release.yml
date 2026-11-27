@@ -56,8 +56,15 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          PERM="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_TRIGGERING_ACTOR}/permission" --jq .permission)"
-          case "$PERM" in admin|maintain|write) ;; *) echo "release requires repository write permission"; exit 1;; esac
+          # A dispatch issued by a workflow that lives on main uses the repository's own
+          # GITHUB_TOKEN, so there is no collaborator to look up. Code on main already holds
+          # the release secrets, so this path is no wider than a manual dispatch from main.
+          if [ "${GITHUB_TRIGGERING_ACTOR}" = "github-actions[bot]" ]; then
+            echo "release dispatched by a workflow on ${GITHUB_REF}"
+          else
+            PERM="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_TRIGGERING_ACTOR}/permission" --jq .permission)"
+            case "$PERM" in admin|maintain|write) ;; *) echo "release requires repository write permission"; exit 1;; esac
+          fi
           if [ "$EVENT" = "workflow_dispatch" ]; then
             TAG="$INPUT_TAG"
             [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "dispatch must run from main (got $GITHUB_REF)"; exit 1; }
