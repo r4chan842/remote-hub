@@ -1,0 +1,102 @@
+# Test builds for maintainers. Publishes a GitHub *pre-release* with per-ABI APKs signed by
+# the CI debug key, so changes can be installed and tried before the persistent release key
+# (ANDROID_KEYSTORE_* secrets) is configured. Debug-signed APKs cannot update an install
+# signed by another key: uninstall the previous build first. Real releases use release.yml.
+name: Preview build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/preview.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Pre-release tag (vMAJOR.MINOR.PATCH-preview.N)"
+        required: true
+        default: "v1.0.1-preview.1"
+
+permissions:
+  contents: write
+  actions: read   # fetch-native.sh downloads artifacts of native.yml
+
+concurrency:
+  group: preview
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG: ${{ inputs.tag || 'v1.0.1-preview.1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Validate tag
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+$ ]] || { echo "bad tag $TAG" >&2; exit 1; }
+          echo "VERSION_NAME=${TAG#v}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$(date -u +%y%m%d%H)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1
+        with:
+          gradle-version: "8.11.1"
+          cache-read-only: true
+
+      - name: Fetch native artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/fetch-native.sh
+
+      - name: Build per-ABI APKs (debug-signed)
+        env:
+          RH_GITHUB_CLIENT_ID: ${{ vars.RH_GITHUB_CLIENT_ID }}
+        run: >
+          gradle --no-daemon :composeApp:assembleRelease
+          -PappVersionCode=${VERSION_CODE}
+          -PappVersionName=${VERSION_NAME}
+
+      - name: Verify APKs (packaging, 16 KB alignment, size)
+        run: bash scripts/verify-apk.sh
+
+      - name: Stage assets
+        run: |
+          set -euo pipefail
+          mkdir -p preview
+          while IFS=$'\t' read -r abi apk; do
+            cp "$apk" "preview/RemoteHub-${TAG}-${abi}.apk"
+          done < build-report/apk-assets.tsv
+          cp build-report/apk-report.txt preview/
+          (cd preview && sha256sum *.apk > SHA256SUMS.txt)
+          ls -l preview
+          {
+            echo "**Test build — not a stable release.**"
+            echo
+            echo "- Signed with the CI debug key: uninstall RemoteHub 1.0.0 before installing."
+            echo "- Most phones: \`arm64-v8a\`. Older 32-bit phones: \`armeabi-v7a\`. Unsure: \`universal\`."
+            echo "- Built from ${GITHUB_SHA}."
+            echo
+            echo '```text'
+            grep -E '^.+ size [0-9]+ bytes' build-report/apk-report.txt || true
+            echo '```'
+          } > preview/NOTES.md
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; not overwriting" >&2
+            exit 1
+          fi
+          gh release create "$TAG" --prerelease --target "$GITHUB_SHA" \
+            --title "RemoteHub $TAG (test build)" --notes-file preview/NOTES.md \
+            preview/*.apk preview/SHA256SUMS.txt preview/apk-report.txt
