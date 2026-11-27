@@ -990,7 +990,8 @@ class SessionController(
      * handshaking", and the last frame sat under a permanent connecting spinner.
      * Reconnect once; if that also fails, surface the real reason.
      */
-    private fun handleRemoteDrop(serverId: String, reason: String) {
+    private fun handleRemoteDrop(serverId: String, reason: String) = scope.launch {
+        // Runs off the engine callback thread: close() joins that thread.
         rdpSessions.remove(serverId)?.close()
         metricsCache.remove(serverId)
         updateServer(serverId) {
@@ -1000,17 +1001,15 @@ class SessionController(
         Diagnostics.warn("rdp", "session dropped: $reason")
         if (state.screen != AppScreen.Remote || state.activeServerId != serverId) {
             publish(state.copy(remoteConnecting = false))
-            return
+            return@launch
         }
         publish(state.copy(remoteConnecting = true))
-        scope.launch {
-            delay(1200)
-            if (state.screen == AppScreen.Remote && state.activeServerId == serverId) {
-                Diagnostics.info("rdp", "reconnecting after a dropped link")
-                connectRemote(serverId, allowAutoReconnect = false)
-            } else {
-                publish(state.copy(remoteConnecting = false))
-            }
+        delay(1200)
+        if (state.screen == AppScreen.Remote && state.activeServerId == serverId) {
+            Diagnostics.info("rdp", "reconnecting after a dropped link")
+            connectRemote(serverId, allowAutoReconnect = false)
+        } else {
+            publish(state.copy(remoteConnecting = false))
         }
     }
 

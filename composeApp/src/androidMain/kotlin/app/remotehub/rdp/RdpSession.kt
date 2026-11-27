@@ -109,7 +109,12 @@ class RdpSession(
                         )
                     } else {
                         publishMetrics()
-                        onDropped(message.ifBlank { "the remote session closed" })
+                        // rh_notify_state invokes this listener synchronously on the
+                        // engine thread. The handler closes the session, and
+                        // nativeDestroy waits on that very thread, so handing it over
+                        // directly would deadlock for 10s and then free a live context.
+                        val reason = message.ifBlank { "the remote session closed" }
+                        scope.launch(Dispatchers.Main) { onDropped(reason) }
                     }
                 }
                 NativeRdp.STATE_CONNECTED -> {
