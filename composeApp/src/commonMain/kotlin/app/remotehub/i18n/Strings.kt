@@ -344,6 +344,8 @@ class AppStrings(
     val errRdpHint: String = values.getValue("errRdpHint")
     val errGenericTitle: String = values.getValue("errGenericTitle")
     val errGenericHint: String = values.getValue("errGenericHint")
+    val errCryptoTitle: String = values.getValue("errCryptoTitle")
+    val errCryptoHint: String = values.getValue("errCryptoHint")
 }
 
 /** Every key a locale must provide. */
@@ -405,9 +407,12 @@ val requiredKeys: List<String> = listOf(
     "errGithubAuthTitle", "errGithubAuthHint", "errGithubScopeTitle", "errGithubScopeHint", "errGithubRateTitle",
     "errGithubRateHint", "errStorageTitle", "errStorageHint", "errRdpTitle", "errRdpHint",
     "errGenericTitle", "errGenericHint",
+    "errCryptoTitle", "errCryptoHint",
 )
 
 val Persian = AppStrings("fa", true, mapOf(
+    "errCryptoTitle" to "موتور رمزنگاری روی این دستگاه بارگذاری نشد",
+    "errCryptoHint" to "این نسخه را حذف و تازه نصب کنید؛ اگر تکرار شد، لاگ را بفرستید.",
     "logsTitle" to "لاگ‌ها",
     "logsSubtitle" to "هرچه در برنامه رخ داده، با زمان دقیق",
     "logsEmpty" to "هنوز لاگی ثبت نشده",
@@ -738,6 +743,8 @@ val Persian = AppStrings("fa", true, mapOf(
 ))
 
 val English = AppStrings("en", false, mapOf(
+    "errCryptoTitle" to "The encryption engine could not load on this device",
+    "errCryptoHint" to "Uninstall and reinstall this build; if it repeats, send the log.",
     "logsTitle" to "Logs",
     "logsSubtitle" to "Everything the app did, with exact times",
     "logsEmpty" to "No log entries yet",
@@ -1068,6 +1075,8 @@ val English = AppStrings("en", false, mapOf(
 ))
 
 val Arabic = AppStrings("ar", true, mapOf(
+    "errCryptoTitle" to "تعذّر تحميل محرك التشفير على هذا الجهاز",
+    "errCryptoHint" to "احذف هذا الإصدار وثبّته من جديد؛ إذا تكرر الأمر فأرسل السجل.",
     "logsTitle" to "السجلات",
     "logsSubtitle" to "كل ما حدث في التطبيق مع الوقت الدقيق",
     "logsEmpty" to "لا توجد سجلات بعد",

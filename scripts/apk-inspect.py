@@ -17,7 +17,14 @@ DESKTOP_PREFIXES = (
     "com/sun/jna/aix-", "com/sun/jna/darwin", "com/sun/jna/win32-", "com/sun/jna/sunos-",
     "com/sun/jna/freebsd-", "com/sun/jna/openbsd-", "com/sun/jna/dragonflybsd-", "com/sun/jna/linux-",
 )
-REQUIRED_LIBRARIES = {"libgojni.so", "libremotehub-rdp.so", "libfreerdp3.so", "libsodium.so"}
+REQUIRED_LIBRARIES = {
+    "libgojni.so",
+    "libremotehub-rdp.so",
+    "libfreerdp3.so",
+    "libsodium.so",
+    # JNA loads this before libsodium; without it every secret-box seal fails.
+    "libjnidispatch.so",
+}
 BITS64 = {"arm64-v8a", "x86_64"}
 
 

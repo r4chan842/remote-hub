@@ -12,7 +12,7 @@ set -euo pipefail
 
 APK_DIR="${APK_DIR:-composeApp/build/outputs/apk/release}"
 REQUIRE_UNIVERSAL="${REQUIRE_UNIVERSAL:-true}"
-ALLOW_4K_LIBS="${ALLOW_4K_LIBS:-libsodium.so}"
+ALLOW_4K_LIBS="${ALLOW_4K_LIBS:-}"
 mapfile -t APKS < <(find "$APK_DIR" -name '*.apk' | sort)
 if [ "${#APKS[@]}" -eq 0 ]; then
   echo "no release APK was produced" >&2

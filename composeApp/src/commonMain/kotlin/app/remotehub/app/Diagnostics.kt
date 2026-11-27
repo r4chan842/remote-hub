@@ -55,6 +55,11 @@ fun classifyError(raw: String, s: AppStrings): AppError {
             lower.contains("log state") || lower.contains("prepare writable directories") ->
             pair("logdir", s.errLogDirTitle, s.errLogDirHint)
 
+        lower.contains("jnidispatch") || lower.contains("unsatisfiedlink") ||
+            lower.contains("lazysodium") || lower.contains("libsodium") ||
+            lower.contains("native library") || lower.contains("sealed box") ->
+            pair("crypto", s.errCryptoTitle, s.errCryptoHint)
+
         lower.contains("panic") ->
             pair("panic", s.errPanicTitle, s.errPanicHint)
 

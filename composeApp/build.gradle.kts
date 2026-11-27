@@ -41,8 +41,15 @@ kotlin {
             implementation(files("libs/tsbridge.aar"))
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
-            implementation(libs.lazysodium.android)
-            implementation(libs.jna)
+            // Android needs the AAR of both libraries, not the JAR.
+            // The JARs carry desktop dispatch natives only, so JNA aborts with
+            // "Native library (com/sun/jna/android-aarch64/libjnidispatch.so) not
+            // found in resource path". The AARs put libjnidispatch.so and
+            // libsodium.so under jni/<abi>/, which AGP packages into lib/<abi>/.
+            // @aar also stops lazysodium's POM from dragging the JNA JAR back in.
+            // lazysodium-android 5.2.0 and JNA 5.17.0 are both 16 KB-page aligned.
+            implementation("com.goterl:lazysodium-android:${libs.versions.lazysodiumAndroid.get()}@aar")
+            implementation("net.java.dev.jna:jna:${libs.versions.jna.get()}@aar")
         }
         getByName("desktopMain").dependencies {
             implementation(compose.desktop.currentOs)

@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import app.remotehub.R
 import app.remotehub.RemoteHubApplication
 import app.remotehub.backup.BackupCodec
+import app.remotehub.data.CryptoCheck
 import app.remotehub.data.SecureStore
 import app.remotehub.data.SecretBox
 import app.remotehub.data.StoreKeys
@@ -217,6 +218,11 @@ class SessionController(
             )
         }
         Diagnostics.info("app", "session restored: servers=${next.servers.size} github=${next.account != null}")
+        // Prove the crypto engine works now, not halfway through creating a server.
+        scope.launch {
+            val problem = withContext(Dispatchers.IO) { CryptoCheck.run() }
+            if (problem != null) withContext(Dispatchers.Main) { fail("crypto", problem) }
+        }
         publish(next.copy(logs = Diagnostics.snapshot(next.logFilter, next.logQuery)))
         if (token != null) refreshAccount()
         val key = store.get(StoreKeys.TS_AUTH_KEY)
@@ -450,6 +456,10 @@ class SessionController(
         val authKey = store.get(StoreKeys.TS_AUTH_KEY)
         if (authKey.isNullOrBlank()) {
             publish(state.copy(error = context.getString(R.string.err_key_empty), screen = AppScreen.Setup))
+            return
+        }
+        CryptoCheck.run()?.let { problem ->
+            fail("crypto", problem)
             return
         }
         val form = state.form
