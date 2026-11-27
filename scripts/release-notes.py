@@ -21,8 +21,16 @@ Android-only release. Desktop platforms are out of scope for this version.
 
 - {tests} automated tests executed on GitHub Actions, zero failures.
 - APK signed and verified with `apksigner`.
-- Native libraries present for `arm64-v8a` and `armeabi-v7a`.
-- APK size: {size_mb:.1f} MB.
+- Native libraries stored uncompressed and zip-aligned to 16 KB (no extraction at install). Per-library ELF alignment is listed in `apk-report.txt`.
+- Signing certificate SHA-256: `{cert}`.
+
+### Which APK to download
+
+{apk_table}
+
+Most phones from 2017 onward need **arm64-v8a**. Older 32-bit devices need **armeabi-v7a**.
+If unsure, take the universal APK: same features, larger download. All variants contain
+the same embedded Tailscale and FreeRDP engines.
 
 ### Compliance
 
@@ -30,7 +38,7 @@ GitHub Actions is used only for build, test, release and short orchestration. Ea
 
 ### Install
 
-Download the APK below and allow installation from your browser or file manager. Verify the download against `SHA256SUMS.txt`.
+Download the APK for your device below and allow installation from your browser or file manager. Verify the download against `SHA256SUMS.txt`.
 
 ### First run
 
@@ -43,16 +51,34 @@ Guides in all three languages are built into Settings, Guides.
 """
 
 
+LABELS = (
+    ("arm64-v8a", "64-bit ARM (almost all current phones)"),
+    ("armeabi-v7a", "32-bit ARM (older devices)"),
+    ("universal", "Both ABIs, fallback"),
+)
+
+
+def apk_table(apks: list) -> str:
+    rows = ["| File | Device | Size |", "|---|---|---|"]
+    for apk in apks:
+        name = os.path.basename(apk)
+        label = next((text for key, text in LABELS if key in name), "")
+        rows.append(f"| `{name}` | {label} | {os.path.getsize(apk) / (1024 * 1024):.1f} MB |")
+    return "\n".join(rows)
+
+
 def main() -> None:
     total = 0
     for path in glob.glob("composeApp/build/test-results/**/*.xml", recursive=True):
         total += int(ET.parse(path).getroot().get("tests", 0))
-    apk = sorted(glob.glob("release/*.apk"))[0]
-    size_mb = os.path.getsize(apk) / (1024 * 1024)
+    apks = sorted(glob.glob("release/*.apk"))
+    if not apks:
+        raise SystemExit("no APK in release/")
     notes = TEMPLATE.format(
         tag=os.environ["TAG"],
         tests=total,
-        size_mb=size_mb,
+        apk_table=apk_table(apks),
+        cert=os.environ.get("CERT_SHA256", "see apk-report.txt"),
         freerdp=os.environ.get("FREERDP_VERSION", "3.33.1"),
     )
     with open("release/NOTES.md", "w", encoding="utf-8") as handle:
