@@ -76,6 +76,7 @@ object Symbols {
     const val public: String = "\ue80b"
     const val refresh: String = "\ue5d5"
     const val replay: String = "\ue042"
+    const val restartAlt: String = "\uf053"
     const val rocketLaunch: String = "\ueb9b"
     const val save: String = "\ue161"
     const val schedule: String = "\uefd6"

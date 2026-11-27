@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package app.remotehub.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -139,7 +141,7 @@ fun ServerDetailContent(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 LifecycleButton(Symbols.stop, s.stop, onStop, Modifier.weight(1f), destructive = true)
-                LifecycleButton(Symbols.restart, s.restart, onRestart, Modifier.weight(1f))
+                LifecycleButton(Symbols.restartAlt, s.restart, onRestart, Modifier.weight(1f))
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -263,7 +265,7 @@ private fun LifecycleButton(glyph: String, label: String, onClick: () -> Unit, m
 fun operationGlyph(kind: OperationKind): String = when (kind) {
     OperationKind.Provision -> Symbols.rocketLaunch
     OperationKind.Stop -> Symbols.stop
-    OperationKind.Restart -> Symbols.restart
+    OperationKind.Restart -> Symbols.restartAlt
     OperationKind.Rebuild -> Symbols.build
     OperationKind.Backup -> Symbols.backup
     OperationKind.Restore -> Symbols.cloudDownload

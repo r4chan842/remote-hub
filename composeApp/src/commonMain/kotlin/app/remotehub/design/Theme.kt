@@ -60,7 +60,7 @@ data class StatusColors(
     }
 }
 
-val LocalSymbolFont = staticCompositionLocalOf { FontFamily.Default }
+val LocalSymbolFont = staticCompositionLocalOf<FontFamily> { FontFamily.Default }
 val LocalStatusColors = staticCompositionLocalOf { StatusColors.light }
 
 private val LightScheme = lightColorScheme(
