@@ -13,7 +13,11 @@ import io.ktor.http.Parameters
 import io.ktor.http.HttpHeaders
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import kotlin.time.TimeSource
+
+const val CREATE_TOKEN_URL = "https://github.com/settings/tokens/new?scopes=repo,workflow&description=RemoteHub"
 
 sealed interface DevicePoll {
     data object Pending : DevicePoll
@@ -29,6 +33,7 @@ class DeviceFlowClient(
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val http = HttpClient(engine) {
         expectSuccess = false
+        followRedirects = false
         install(ContentNegotiation) { json(json) }
     }
 
@@ -42,7 +47,11 @@ class DeviceFlowClient(
             val err = runCatching { json.decodeFromString<DeviceTokenResponse>(text).error }.getOrNull()
             throw GitHubException(response.status.value, err ?: "device_code_request_failed")
         }
-        return json.decodeFromString(text)
+        val code: DeviceCodeResponse = json.decodeFromString(text)
+        if (code.userCode.isBlank() || code.deviceCode.isBlank() || code.expiresIn <= 0) {
+            throw GitHubException(response.status.value, "invalid_device_code_response")
+        }
+        return code.copy(verificationUri = GITHUB_DEVICE_URL)
     }
 
     suspend fun pollOnce(deviceCode: String): DevicePoll {
@@ -79,20 +88,27 @@ class DeviceFlowClient(
         onTick: (remainingSeconds: Int) -> Unit = {},
     ): DevicePoll {
         var interval = code.interval.coerceAtLeast(5)
-        var remaining = code.expiresIn
-        while (remaining > 0) {
-            onTick(remaining)
-            delay(interval * 1000L)
-            remaining -= interval
-            when (val result = pollOnce(code.deviceCode)) {
-                is DevicePoll.Granted -> return result
-                is DevicePoll.Failed -> return result
-                is DevicePoll.SlowDown -> interval = maxOf(interval + 5, result.newInterval)
-                DevicePoll.Pending -> Unit
+        val started = TimeSource.Monotonic.markNow()
+        return withTimeoutOrNull<DevicePoll>(code.expiresIn * 1000L) {
+            while (true) {
+                val remaining = (code.expiresIn - started.elapsedNow().inWholeSeconds).coerceAtLeast(0).toInt()
+                onTick(remaining)
+                delay(interval * 1000L)
+                when (val result = pollOnce(code.deviceCode)) {
+                    is DevicePoll.Granted -> return@withTimeoutOrNull result
+                    is DevicePoll.Failed -> return@withTimeoutOrNull result
+                    is DevicePoll.SlowDown -> interval = maxOf(interval + 5, result.newInterval)
+                    DevicePoll.Pending -> Unit
+                }
             }
-        }
-        return DevicePoll.Failed("expired_token")
+            @Suppress("UNREACHABLE_CODE")
+            error("Polling must end with a result or timeout")
+        } ?: DevicePoll.Failed("expired_token")
     }
 
     fun close() = http.close()
+
+    companion object {
+        const val GITHUB_DEVICE_URL = "https://github.com/login/device"
+    }
 }

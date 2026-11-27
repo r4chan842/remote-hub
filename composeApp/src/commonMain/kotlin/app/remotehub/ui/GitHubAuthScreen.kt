@@ -59,6 +59,7 @@ fun GitHubAuthContent(
     onValidatePat: () -> Unit,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
+    onCreateToken: () -> Unit = {},
     error: String? = null,
     busy: Boolean = false,
 ) {
@@ -228,11 +229,19 @@ fun GitHubAuthContent(
                 if (!error.isNullOrBlank()) {
                     Text(error, style = MaterialTheme.typography.bodySmall, color = scheme.error, modifier = Modifier.padding(top = 10.dp))
                 }
+                OutlinedButton(
+                    onClick = onCreateToken,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp).height(40.dp),
+                ) {
+                    Symbol(Symbols.openInNew, size = 18.dp)
+                    Text("  " + s.openGithub, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
                 Button(
                     onClick = onValidatePat,
                     enabled = !busy && patInput.isNotBlank(),
                     shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp).height(40.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(40.dp),
                 ) {
                     Symbol(Symbols.shield, size = 18.dp)
                     Text("  " + s.validateAndSave, style = MaterialTheme.typography.labelLarge)

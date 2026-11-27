@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import kotlinx.coroutines.launch
 import app.remotehub.design.RemoteHubTheme
 import app.remotehub.domain.AuthMethod
 import app.remotehub.domain.DeviceFlowPhase
@@ -43,6 +44,17 @@ fun RemoteHubApp() {
     var localeTag by remember { mutableStateOf("fa") }
     var authMethod by remember { mutableStateOf(AuthMethod.DeviceFlow) }
     var patInput by remember { mutableStateOf("") }
+    val store = remember { app.remotehub.data.createSecureStore() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var account by remember {
+        mutableStateOf(
+            store.get(app.remotehub.data.StoreKeys.GITHUB_LOGIN)?.let {
+                app.remotehub.domain.GitHubAccount(it, it, AuthMethod.PersonalAccessToken, emptyList(), emptyList(), "")
+            },
+        )
+    }
+    var authBusy by remember { mutableStateOf(false) }
+    var authError by remember { mutableStateOf<String?>(null) }
     var authKeyInput by remember { mutableStateOf("") }
     var expiryAlert by remember { mutableStateOf(true) }
     var biometric by remember { mutableStateOf(false) }
@@ -136,7 +148,7 @@ fun RemoteHubApp() {
                         modifier = contentModifier,
                     )
                     destination == Destination.Servers -> GitHubAuthContent(
-                        account = null,
+                        account = account,
                         method = authMethod,
                         deviceFlow = deviceFlow,
                         patInput = patInput,
@@ -146,9 +158,36 @@ fun RemoteHubApp() {
                         onMethodChange = { authMethod = it },
                         onPatChange = { patInput = it },
                         onCopyCode = {},
-                        onOpenGitHub = {},
-                        onValidatePat = {},
-                        onDisconnect = {},
+                        onOpenGitHub = { openInBrowser("https://github.com/login/device") },
+                        onCreateToken = { openInBrowser("https://github.com/settings/tokens/new?scopes=repo,workflow&description=RemoteHub") },
+                        onValidatePat = {
+                            val token = patInput.trim()
+                            authBusy = true
+                            authError = null
+                            scope.launch {
+                                val client = app.remotehub.github.GitHubClient(token)
+                                runCatching { client.validate() }
+                                    .onSuccess { v ->
+                                        store.put(app.remotehub.data.StoreKeys.GITHUB_TOKEN, token)
+                                        store.put(app.remotehub.data.StoreKeys.GITHUB_LOGIN, v.user.login)
+                                        account = app.remotehub.domain.GitHubAccount(
+                                            v.user.login, v.user.name ?: v.user.login, AuthMethod.PersonalAccessToken,
+                                            v.scopes, v.missing, "",
+                                        )
+                                        patInput = ""
+                                    }
+                                    .onFailure { authError = it.message ?: "validation failed" }
+                                client.close()
+                                authBusy = false
+                            }
+                        },
+                        onDisconnect = {
+                            store.remove(app.remotehub.data.StoreKeys.GITHUB_TOKEN)
+                            store.remove(app.remotehub.data.StoreKeys.GITHUB_LOGIN)
+                            account = null
+                        },
+                        error = authError,
+                        busy = authBusy,
                         modifier = contentModifier,
                     )
                     destination == Destination.Network -> NetworkContent(
@@ -176,12 +215,31 @@ fun RemoteHubApp() {
                             patInput = ""
                             authKeyInput = ""
                         },
-                        onOpenGuide = {},
+                        onOpenGuide = { openInBrowser("https://github.com/r4chan842/remote-hub#readme") },
                         modifier = contentModifier,
                     )
                 }
             }
         }
+    }
+}
+
+/** Opens a URL in the system browser; falls back to the OS opener when AWT Desktop is unavailable. */
+fun openInBrowser(url: String) {
+    val ok = runCatching {
+        val d = java.awt.Desktop.getDesktop()
+        if (java.awt.Desktop.isDesktopSupported() && d.isSupported(java.awt.Desktop.Action.BROWSE)) {
+            d.browse(java.net.URI(url)); true
+        } else false
+    }.getOrDefault(false)
+    if (!ok) {
+        val os = System.getProperty("os.name").lowercase()
+        val cmd = when {
+            os.contains("win") -> listOf("rundll32", "url.dll,FileProtocolHandler", url)
+            os.contains("mac") -> listOf("open", url)
+            else -> listOf("xdg-open", url)
+        }
+        runCatching { ProcessBuilder(cmd).start() }
     }
 }
 
