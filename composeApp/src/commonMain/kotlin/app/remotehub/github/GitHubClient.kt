@@ -135,18 +135,6 @@ class GitHubClient(
         )
     }
 
-    /**
-     * Re-runs an existing run instead of dispatching a new one. GitHub keeps the run
-     * id, the run number and the original inputs, so the session id, the tailnet
-     * hostname and the repository secrets all stay the same; only a new attempt is
-     * added. That is what makes "restart" feel like restarting the same server.
-     *
-     * POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun -> 201
-     */
-    suspend fun rerun(owner: String, repo: String, runId: Long) {
-        ensureSuccess(request("POST", "/repos/$owner/$repo/actions/runs/$runId/rerun"))
-    }
-
     /** Re-runs only the jobs that did not succeed, keeping the successful ones. */
     suspend fun rerunFailed(owner: String, repo: String, runId: Long) {
         ensureSuccess(request("POST", "/repos/$owner/$repo/actions/runs/$runId/rerun-failed-jobs"))
@@ -222,6 +210,12 @@ class GitHubClient(
         ensureSuccess(request("POST", "/repos/$owner/$repo/actions/runs/$runId/cancel"))
     }
 
+    /**
+     * Re-runs an existing run instead of dispatching a new one. GitHub keeps the run
+     * id, the run number and the original inputs, so the session id, the tailnet
+     * hostname and the repository secrets all stay the same; only a new attempt is
+     * added. That is what makes "restart" restart the same server.
+     */
     suspend fun rerun(owner: String, repo: String, runId: Long) {
         ensureSuccess(request("POST", "/repos/$owner/$repo/actions/runs/$runId/rerun"))
     }

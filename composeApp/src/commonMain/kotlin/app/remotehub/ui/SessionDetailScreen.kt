@@ -24,6 +24,7 @@ import app.remotehub.design.NoticeBanner
 import app.remotehub.design.Panel
 import app.remotehub.design.SectionTitle
 import app.remotehub.design.StatePill
+import app.remotehub.design.CornerRadius
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
 import app.remotehub.design.TimeMeter
@@ -120,7 +121,7 @@ fun SessionDetailContent(
         Button(
             onClick = onConnect,
             enabled = !stopped && connection?.address?.isNotBlank() == true && !busy,
-            shape = MaterialTheme.shapes.large,
+            shape = CornerRadius.full,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Symbol(Symbols.desktopWindows, size = 20.dp)
@@ -132,9 +133,9 @@ fun SessionDetailContent(
                 Symbol(Symbols.backup, size = 18.dp)
                 Text("  " + s.backup, style = MaterialTheme.typography.labelMedium)
             }
-            OutlinedButton(onClick = onRerun, enabled = !busy, shape = MaterialTheme.shapes.large, modifier = Modifier.weight(1f)) {
-                Symbol(Symbols.refresh, size = 18.dp)
-                Text("  " + s.rerun, style = MaterialTheme.typography.labelMedium)
+            OutlinedButton(onClick = onRerun, enabled = !busy, shape = CornerRadius.full, modifier = Modifier.weight(1f)) {
+                Symbol(Symbols.restartAlt, size = 18.dp)
+                Text("  " + s.restartServer, style = MaterialTheme.typography.labelMedium, maxLines = 1)
             }
         }
         OutlinedButton(
@@ -147,7 +148,7 @@ fun SessionDetailContent(
             Text("  " + s.stopServer, style = MaterialTheme.typography.labelMedium)
         }
 
-        NoticeBanner(s.rerunNote)
+        NoticeBanner(s.restartHint)
 
         if (server.backups.isNotEmpty()) {
             Panel {

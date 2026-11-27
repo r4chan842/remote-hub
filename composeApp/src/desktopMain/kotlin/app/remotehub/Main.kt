@@ -51,12 +51,15 @@ import app.remotehub.ui.CreateContent
 import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
 import app.remotehub.ui.LogsContent
+import app.remotehub.ui.NetworkContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
 import app.remotehub.ui.RemoteMetrics
 import app.remotehub.ui.SessionDetailContent
 import app.remotehub.ui.SettingsContent
+import app.remotehub.ui.ServersContent
 import app.remotehub.ui.SetupContent
+import app.remotehub.ui.TailnetDevice
 
 /**
  * Desktop is a design bench, not a shipping target: it shows the real Compose screens
@@ -185,6 +188,8 @@ fun RemoteHubApp() {
                                 AppScreen.Guide -> strings.guides
                                 AppScreen.Remote -> strings.remoteDesktop
                                 AppScreen.Logs -> strings.logsTitle
+                                AppScreen.Servers -> strings.serversTitle
+                                AppScreen.Network -> strings.networkScreenTitle
                             },
                             navigationIcon = if (screen == AppScreen.Setup) null else { { BackIcon(onClick = { screen = AppScreen.Setup }) } },
                         ) { padding ->
@@ -227,6 +232,28 @@ fun RemoteHubApp() {
                                     modifier = m,
                                 )
                                 AppScreen.Remote -> Unit
+                                AppScreen.Servers -> ServersContent(
+                                    servers = listOf(server),
+                                    padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                    onOpen = { screen = AppScreen.Detail },
+                                    onConnect = { screen = AppScreen.Remote },
+                                    onRestart = { screen = AppScreen.Progress },
+                                    onCreate = { screen = AppScreen.Create },
+                                    modifier = m,
+                                )
+                                AppScreen.Network -> NetworkContent(
+                                    tailnet = state.tailnet,
+                                    devices = listOf(
+                                        TailnetDevice("rh-server-a1b2c3", "100.101.212.73", true),
+                                        TailnetDevice("rh-server-d4e5f6", "100.98.44.12", false),
+                                    ),
+                                    deviceVpn = true,
+                                    vpnBusy = false,
+                                    vpnInterface = "tun0",
+                                    padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                    onToggleVpn = {}, onConnect = {}, onDisconnect = {}, onCopy = { _, _ -> },
+                                    modifier = m,
+                                )
                             }
                         }
                     }
