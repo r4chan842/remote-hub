@@ -123,6 +123,13 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
+            # A push only smoke-tests this workflow with the default tag, which is
+            # usually already published. That is not a failure. An explicit dispatch
+            # must still refuse to overwrite an existing release.
+            if [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]; then
+              echo "release $TAG already exists; push smoke test stops here"
+              exit 0
+            fi
             echo "release $TAG already exists; not overwriting" >&2
             exit 1
           fi
