@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -101,16 +102,25 @@ fun ServerDetailContent(
                     InfoRow(s.address, server.connection.address, monospace = true, onCopy = {})
                     InfoRow(s.port, server.connection.port.toString(), monospace = true, onCopy = {})
                     InfoRow(s.username, server.connection.username, monospace = true, onCopy = {})
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                    ) {
                         Text(
                             s.password,
                             style = MaterialTheme.typography.bodyMedium,
                             color = scheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 8.dp),
+                            modifier = Modifier.width(112.dp),
                         )
+                        val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current ==
+                            androidx.compose.ui.unit.LayoutDirection.Rtl
                         Text(
                             if (passwordVisible) server.connection.password else "••••••••••••",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                textDirection = androidx.compose.ui.text.style.TextDirection.Ltr,
+                                textAlign = if (rtl) androidx.compose.ui.text.style.TextAlign.Right
+                                else androidx.compose.ui.text.style.TextAlign.Start,
+                            ),
                             color = scheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )

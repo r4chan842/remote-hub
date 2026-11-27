@@ -27,6 +27,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
@@ -137,11 +139,12 @@ fun InfoRow(label: String, value: String, modifier: Modifier = Modifier, monospa
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(112.dp),
         )
+        val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium.copy(
                 textDirection = if (monospace) TextDirection.Ltr else TextDirection.Content,
-                textAlign = if (monospace) TextAlign.Start else TextAlign.Start,
+                textAlign = if (monospace && rtl) TextAlign.Right else TextAlign.Start,
             ),
             fontWeight = if (monospace) FontWeight.Medium else FontWeight.Normal,
             color = MaterialTheme.colorScheme.onSurface,
