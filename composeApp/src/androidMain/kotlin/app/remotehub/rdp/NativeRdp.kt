@@ -16,17 +16,29 @@ object NativeRdp {
     const val STATE_FAILED = 5
     const val STATE_CERT_CHANGED = 6
 
+    // Slow-path TS_POINTER_EVENT field (MS-RDPBCGR 2.2.8.1.1.3.1.1.3).
+    // These used to hold the *extended* button bits (0x0001 / 0x0002), which are
+    // reserved here. Windows answered ERRINFO_INVALID_INPUT_PDU_MOUSE (0x10D0)
+    // and disconnected on the first click or drag.
     const val PTR_MOVE = 0x0800
-    const val PTR_DOWN_LEFT = 0x8001
-    const val PTR_UP_LEFT = 0x0001
-    const val PTR_DOWN_RIGHT = 0x8002
-    const val PTR_UP_RIGHT = 0x0002
-    const val PTR_DOWN_MIDDLE = 0x8004
-    const val PTR_UP_MIDDLE = 0x0004
+    const val PTR_DOWN = 0x8000
+    const val PTR_BUTTON1 = 0x1000
+    const val PTR_BUTTON2 = 0x2000
+    const val PTR_BUTTON3 = 0x4000
+    const val PTR_DOWN_LEFT = PTR_DOWN or PTR_BUTTON1
+    const val PTR_UP_LEFT = PTR_BUTTON1
+    const val PTR_DOWN_RIGHT = PTR_DOWN or PTR_BUTTON2
+    const val PTR_UP_RIGHT = PTR_BUTTON2
+    const val PTR_DOWN_MIDDLE = PTR_DOWN or PTR_BUTTON3
+    const val PTR_UP_MIDDLE = PTR_BUTTON3
     const val PTR_WHEEL = 0x0200
     const val PTR_HWHEEL = 0x0400
-    const val PTR_XDOWN = 0x0080
-    const val PTR_XUP = 0x0100
+    const val PTR_WHEEL_NEGATIVE = 0x0100
+
+    // Extended field, a different PDU: only back / forward buttons live here.
+    const val PTR_XDOWN = 0x8000
+    const val PTR_XBUTTON1 = 0x0001
+    const val PTR_XBUTTON2 = 0x0002
 
     const val TOUCH_DOWN = 0x01
     const val TOUCH_UP = 0x02
@@ -102,6 +114,11 @@ object NativeRdp {
         if (available && handle != 0L) nativeWheel(handle, flags, x, y)
     }
 
+    /** Back / forward buttons. These use the extended PDU, unlike the wheel. */
+    fun xButton(handle: Long, flags: Int, x: Int, y: Int) {
+        if (available && handle != 0L) nativeXButton(handle, flags, x, y)
+    }
+
     fun touch(handle: Long, flags: Int, finger: Int, pressure: Int, x: Int, y: Int) {
         if (available && handle != 0L) nativeTouch(handle, flags, finger, pressure, x, y)
     }
@@ -172,6 +189,7 @@ object NativeRdp {
     @JvmStatic private external fun nativeRender(handle: Long, bitmap: Bitmap): Int
     @JvmStatic private external fun nativeMouse(handle: Long, flags: Int, x: Int, y: Int)
     @JvmStatic private external fun nativeWheel(handle: Long, flags: Int, x: Int, y: Int)
+    @JvmStatic private external fun nativeXButton(handle: Long, flags: Int, x: Int, y: Int)
     @JvmStatic private external fun nativeTouch(handle: Long, flags: Int, finger: Int, pressure: Int, x: Int, y: Int)
     @JvmStatic private external fun nativeKey(handle: Long, scancode: Int, down: Boolean)
     @JvmStatic private external fun nativeUnicode(handle: Long, code: Int)

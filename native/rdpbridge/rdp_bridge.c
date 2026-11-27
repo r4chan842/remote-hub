@@ -133,6 +133,13 @@ static BOOL rh_wlog_message(const wLogMessage* msg)
 		return FALSE;
 	char line[RH_LOG_LINE];
 	const char* prefix = msg->PrefixString ? msg->PrefixString : "";
+	/* transport_layer_bio_ctrl() does not implement BIO_CTRL_EOF and answers every
+	 * TLS read with an error plus a 20-frame backtrace. That is noise, and 128 ring
+	 * slots of it pushed every real diagnostic out of the buffer. */
+	if (strstr(prefix, "winpr_log_backtrace") != NULL)
+		return TRUE;
+	if (strstr(msg->TextString, "Unsupported BIO_CTRL") != NULL)
+		return TRUE;
 	snprintf(line, sizeof(line), "%s%s", prefix, msg->TextString);
 	/* Trim the trailing newline WinPR adds; the app log adds its own layout. */
 	size_t len = strlen(line);
@@ -1106,6 +1113,16 @@ JNIEXPORT jint JNICALL Java_app_remotehub_rdp_NativeRdp_nativeRender(JNIEnv* env
 	return copied ? 1 : 0;
 }
 
+/* MS-RDPBCGR 2.2.8.1.1.3.1.1.3. The action bits are always legal; the low nine
+ * bits are WheelRotationMask and are only meaningful when WHEEL or HWHEEL is
+ * set. 0x8001 (DOWN plus rotation bit 0, no button) is exactly what Windows
+ * rejected with ERRINFO_INVALID_INPUT_PDU_MOUSE before dropping the session.
+ * Validating here means a wrong constant costs one event, not the connection. */
+#define RH_PTR_ACTION_MASK 0xF800u /* DOWN | BUTTON1..3 | MOVE */
+#define RH_PTR_WHEEL_MASK 0x0600u  /* WHEEL | HWHEEL */
+#define RH_PTR_ROTATION_MASK 0x01FFu
+#define RH_PTR_SLOW_MASK (RH_PTR_ACTION_MASK | RH_PTR_WHEEL_MASK)
+
 JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeMouse(JNIEnv* env, jclass cls,
                                                                   jlong handle, jint flags, jint x,
                                                                   jint y)
@@ -1113,9 +1130,36 @@ JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeMouse(JNIEnv* env,
 	rhContext* rh = (rhContext*)(intptr_t)handle;
 	if (!rh || !atomic_load(&rh->connected))
 		return;
-	freerdp_input_send_mouse_event(rh->common.context.input, (UINT16)flags, (UINT16)x, (UINT16)y);
+	const UINT32 uflags = (UINT32)flags & 0xFFFFu;
+	UINT32 allowed = RH_PTR_SLOW_MASK;
+	if ((uflags & RH_PTR_WHEEL_MASK) != 0)
+		allowed |= RH_PTR_ROTATION_MASK;
+	if ((uflags & ~allowed) != 0)
+	{
+		LOGE("rejected mouse event: pointerFlags 0x%04X has reserved bits", (unsigned)uflags);
+		return;
+	}
+	if (uflags == 0)
+		return;
+	if (x < 0 || y < 0)
+		return;
+	UINT32 w = 0;
+	UINT32 h = 0;
+	pthread_mutex_lock(&rh->lock);
+	w = rh->width;
+	h = rh->height;
+	pthread_mutex_unlock(&rh->lock);
+	UINT32 ux = (UINT32)x;
+	UINT32 uy = (UINT32)y;
+	if (w > 0 && ux >= w)
+		ux = w - 1;
+	if (h > 0 && uy >= h)
+		uy = h - 1;
+	freerdp_input_send_mouse_event(rh->common.context.input, (UINT16)uflags, (UINT16)ux, (UINT16)uy);
 }
 
+/* freerdp_client_send_wheel_event() uses the slow-path entry point: the wheel
+ * rotation lives in PTR_FLAGS_WHEEL / _HWHEEL, not in the extended field. */
 JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeWheel(JNIEnv* env, jclass cls,
                                                                   jlong handle, jint flags, jint x,
                                                                   jint y)
@@ -1123,7 +1167,38 @@ JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeWheel(JNIEnv* env,
 	rhContext* rh = (rhContext*)(intptr_t)handle;
 	if (!rh || !atomic_load(&rh->connected))
 		return;
-	freerdp_input_send_extended_mouse_event(rh->common.context.input, (UINT16)flags, (UINT16)x,
+	const UINT32 raw = (UINT32)flags & 0xFFFFu;
+	/* Keep only what a wheel PDU may carry. Buttons combined with a wheel are not
+	 * a legal combination, so strip them rather than lose the scroll. */
+	const UINT32 uflags = raw & (RH_PTR_WHEEL_MASK | RH_PTR_ROTATION_MASK | 0x0800u);
+	if ((uflags & RH_PTR_WHEEL_MASK) == 0)
+	{
+		LOGE("rejected wheel event: pointerFlags 0x%04X has no wheel flag", (unsigned)raw);
+		return;
+	}
+	if (x < 0 || y < 0)
+		return;
+	freerdp_input_send_mouse_event(rh->common.context.input, (UINT16)uflags, (UINT16)x, (UINT16)y);
+}
+
+/* Back / forward buttons really are extended events (PTR_XFLAGS_*). */
+JNIEXPORT void JNICALL Java_app_remotehub_rdp_NativeRdp_nativeXButton(JNIEnv* env, jclass cls,
+                                                                    jlong handle, jint flags,
+                                                                    jint x, jint y)
+{
+	rhContext* rh = (rhContext*)(intptr_t)handle;
+	if (!rh || !atomic_load(&rh->connected))
+		return;
+	const UINT32 uflags = (UINT32)flags & 0xFFFFu;
+	const UINT32 allowed = 0x8000u | 0x0001u | 0x0002u; /* XFLAGS_DOWN | BUTTON1 | BUTTON2 */
+	if ((uflags & ~allowed) != 0 || uflags == 0)
+	{
+		LOGE("rejected extended button event: flags 0x%04X", (unsigned)uflags);
+		return;
+	}
+	if (x < 0 || y < 0)
+		return;
+	freerdp_input_send_extended_mouse_event(rh->common.context.input, (UINT16)uflags, (UINT16)x,
 	                                        (UINT16)y);
 }
 

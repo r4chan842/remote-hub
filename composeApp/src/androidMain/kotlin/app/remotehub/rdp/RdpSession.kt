@@ -435,6 +435,12 @@ class RdpSession(
         runCatching { NativeRdp.wheel(handle, base or rotation, x, y) }
     }
 
+    /** Back / forward navigation buttons (extended PDU). */
+    fun sendXButton(button: Int, down: Boolean, x: Int, y: Int) {
+        val bit = if (button == 2) NativeRdp.PTR_XBUTTON2 else NativeRdp.PTR_XBUTTON1
+        runCatching { NativeRdp.xButton(handle, (if (down) NativeRdp.PTR_XDOWN else 0) or bit, x, y) }
+    }
+
     /** Kept for hosts with RDPEI. Not used for taps: it synthesises its own mouse click. */
     fun sendTouch(flags: Int, finger: Int, x: Int, y: Int) {
         runCatching { NativeRdp.touch(handle, flags, finger, 0, x, y) }
