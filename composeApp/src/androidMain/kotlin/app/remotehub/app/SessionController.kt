@@ -244,8 +244,21 @@ class SessionController(
             runCatching { node.start(hostname = "remotehub-phone", authKey = key, ephemeral = true) }
                 .onSuccess { status ->
                     applyNodeStatus(status)
-                    publish(state.copy(busy = false))
-                    node.startPolling { applyNodeStatus(it) }
+                    if (status.running) {
+                        publish(state.copy(busy = false, error = null))
+                        node.startPolling { applyNodeStatus(it) }
+                    } else {
+                        // Show what the tunnel actually reported instead of a bare status word.
+                        val detail = status.logs.takeLast(3).joinToString(" · ")
+                        val message = status.error.ifBlank { context.getString(R.string.err_network) }
+                        publish(
+                            state.copy(
+                                busy = false,
+                                error = if (detail.isBlank()) message else "$message\n$detail",
+                                tailnet = state.tailnet.copy(state = NetworkState.Error, lastError = message),
+                            ),
+                        )
+                    }
                 }
                 .onFailure { error ->
                     publish(

@@ -57,14 +57,21 @@ data class TailnetPeer(
 )
 
 class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    // The bridge omits empty slices, and older builds sent them as null; both must
+    // decode into the declared defaults instead of throwing.
+    private val json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+        coerceInputValues = true
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val gate = Any()
     private var node: Node? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var pollJob: Job? = null
     private var forwardAddress: String? = null
 
-    val running: Boolean get() = node != null
+    val running: Boolean get() = snapshot() != null
 
     fun stateDir(name: String): String = Tsbridge.stateDir(context.filesDir.absolutePath, name)
 
@@ -75,32 +82,48 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
     ): NodeStatus = withContext(Dispatchers.IO) {
         stop()
         val created = Tsbridge.newNode(stateDir(hostname), hostname, authKey, ephemeral)
-        node = created
+        synchronized(gate) { node = created }
         created.startAsync()
-        registerNetworkCallback()
-        created.awaitRunning(90_000)
-        status()
+        val up = runCatching { created.awaitRunning(90_000) }.getOrDefault(false)
+        val current = status()
+        if (up && current.running) {
+            // Only a fully started node may be touched by the connectivity callbacks.
+            registerNetworkCallback()
+            current
+        } else {
+            // Leave nothing half-initialised behind: a failed start must not keep a
+            // node object that later JNI calls could dereference.
+            val failed = if (current.error.isBlank()) {
+                current.copy(error = "tailscale did not reach the Running state")
+            } else {
+                current
+            }
+            stop()
+            failed
+        }
     }
 
+    private fun snapshot(): Node? = synchronized(gate) { node }
+
     fun status(): NodeStatus {
-        val current = node ?: return NodeStatus()
+        val current = snapshot() ?: return NodeStatus()
         return runCatching { json.decodeFromString(NodeStatus.serializer(), current.statusJSON()) }
             .getOrElse { NodeStatus(error = it.message ?: "status decode failed") }
     }
 
     fun peers(): List<TailnetPeer> {
-        val current = node ?: return emptyList()
+        val current = snapshot() ?: return emptyList()
         return runCatching {
             json.decodeFromString<List<TailnetPeer>>(current.peersJSON())
         }.getOrDefault(emptyList())
     }
 
-    fun loginUrl(): String = node?.loginURL() ?: ""
+    fun loginUrl(): String = runCatching { snapshot()?.loginURL() }.getOrNull() ?: ""
 
-    fun selfIp(): String = node?.selfIP() ?: ""
+    fun selfIp(): String = runCatching { snapshot()?.selfIP() }.getOrNull() ?: ""
 
     suspend fun openRdpForward(target: String, port: Int): String = withContext(Dispatchers.IO) {
-        val current = node ?: error("tailscale node is not running")
+        val current = snapshot() ?: error("tailscale node is not running")
         val address = current.openForward("127.0.0.1:0", "$target:$port")
         forwardAddress = address
         address
@@ -110,13 +133,13 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
 
     suspend fun probe(host: String, port: Int, timeoutMillis: Int = 6000): Boolean =
         withContext(Dispatchers.IO) {
-            val current = node ?: return@withContext false
+            val current = snapshot() ?: return@withContext false
             runCatching { current.probe("$host:$port", timeoutMillis.toLong()) }.isSuccess
         }
 
     suspend fun latency(host: String, port: Int, timeoutMillis: Int = 6000): Int =
         withContext(Dispatchers.IO) {
-            node?.latencyMillis("$host:$port", timeoutMillis.toLong())?.toInt() ?: -1
+            runCatching { snapshot()?.latencyMillis("$host:$port", timeoutMillis.toLong())?.toInt() }.getOrNull() ?: -1
         }
 
     fun startPolling(intervalMillis: Long = 4000, onStatus: (NodeStatus) -> Unit) {
@@ -138,18 +161,21 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                node?.setNetworkUp(true)
-                node?.notifyNetworkChange()
+                val current = snapshot() ?: return
+                runCatching { current.setNetworkUp(true) }
+                runCatching { current.notifyNetworkChange() }
             }
 
             override fun onLost(network: Network) {
-                node?.notifyNetworkChange()
+                val current = snapshot() ?: return
+                runCatching { current.notifyNetworkChange() }
             }
 
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
                 val validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                node?.setNetworkUp(validated)
-                node?.notifyNetworkChange()
+                val current = snapshot() ?: return
+                runCatching { current.setNetworkUp(validated) }
+                runCatching { current.notifyNetworkChange() }
             }
         }
         networkCallback = callback
@@ -163,28 +189,40 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
             runCatching { manager?.unregisterNetworkCallback(callback) }
         }
         networkCallback = null
-        forwardAddress?.let { node?.closeForward(it) }
+        val current = synchronized(gate) {
+            val held = node
+            node = null
+            held
+        }
+        forwardAddress?.let { address -> runCatching { current?.closeForward(address) } }
         forwardAddress = null
-        node?.stop()
-        node = null
+        runCatching { current?.stop() }
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {
-        runCatching { node?.logout() }
+        runCatching { snapshot()?.logout() }
         Unit
     }
 
     suspend fun wipe(hostname: String) = withContext(Dispatchers.IO) {
-        node?.wipe()
-        node = null
+        val current = synchronized(gate) {
+            val held = node
+            node = null
+            held
+        }
+        runCatching { current?.wipe() }
         runCatching { java.io.File(stateDir(hostname)).deleteRecursively() }
         Unit
     }
 
     fun release() {
-        pollJob?.cancel()
-        node?.stop()
-        node = null
+        stopPolling()
+        val current = synchronized(gate) {
+            val held = node
+            node = null
+            held
+        }
+        runCatching { current?.stop() }
         scope.cancel()
     }
 }

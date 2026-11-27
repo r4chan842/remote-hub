@@ -27,6 +27,7 @@ type Node struct {
 	authKey  string
 	ephem    bool
 	started  bool
+	ready    bool
 	lastErr  string
 	authURL  string
 	logs     []string
@@ -50,16 +51,16 @@ type Status struct {
 	IPv6       string   `json:"ipv6"`
 	AuthURL    string   `json:"authUrl"`
 	Error      string   `json:"error"`
-	Health     []string `json:"health"`
+	Health     []string `json:"health,omitempty"`
 	PeerCount  int      `json:"peerCount"`
 	Online     bool     `json:"online"`
 	Relay      string   `json:"relay"`
 	RxBytes    int64    `json:"rxBytes"`
 	TxBytes    int64    `json:"txBytes"`
-	Logs       []string `json:"logs"`
+	Logs       []string `json:"logs,omitempty"`
 	Version    string   `json:"version"`
 	Userspace  bool     `json:"userspace"`
-	Forwarders []string `json:"forwarders"`
+	Forwarders []string `json:"forwarders,omitempty"`
 }
 
 type Peer struct {
@@ -73,7 +74,7 @@ type Peer struct {
 	RxBytes  int64    `json:"rxBytes"`
 	TxBytes  int64    `json:"txBytes"`
 	LastSeen string   `json:"lastSeen"`
-	Tags     []string `json:"tags"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 func NewNode(stateDir, hostname, authKey string, ephemeral bool) *Node {
@@ -150,6 +151,12 @@ func (n *Node) Start() error {
 		n.mu.Unlock()
 		return err
 	}
+	// Only now is srv.Sys() populated. The Android connectivity callbacks must not
+	// touch the server before this point: a failed start leaves Sys() nil and
+	// dereferencing it crashes the whole process inside libgojni.
+	n.mu.Lock()
+	n.ready = true
+	n.mu.Unlock()
 	return nil
 }
 
@@ -261,23 +268,28 @@ func (n *Node) LoginURL() string {
 
 func (n *Node) SelfIP() string {
 	n.mu.Lock()
-	srv := n.srv
+	srv, ready := n.srv, n.ready
 	n.mu.Unlock()
-	if srv == nil {
+	if srv == nil || !ready {
 		return ""
 	}
+	defer func() { _ = recover() }()
 	ip4, _ := srv.TailscaleIPs()
 	return ip4.String()
 }
 
 func (n *Node) NotifyNetworkChange() {
 	n.mu.Lock()
-	srv := n.srv
+	srv, ready := n.srv, n.ready
 	n.mu.Unlock()
-	if srv == nil {
+	if srv == nil || !ready {
 		return
 	}
+	defer func() { _ = recover() }()
 	sys := srv.Sys()
+	if sys == nil {
+		return
+	}
 	if mon := sys.NetMon.Get(); mon != nil {
 		mon.InjectEvent()
 	}
@@ -289,12 +301,17 @@ func (n *Node) NotifyNetworkChange() {
 
 func (n *Node) SetNetworkUp(up bool) {
 	n.mu.Lock()
-	srv := n.srv
+	srv, ready := n.srv, n.ready
 	n.mu.Unlock()
-	if srv == nil {
+	if srv == nil || !ready {
 		return
 	}
-	if ms := srv.Sys().MagicSock.Get(); ms != nil {
+	defer func() { _ = recover() }()
+	sys := srv.Sys()
+	if sys == nil {
+		return
+	}
+	if ms := sys.MagicSock.Get(); ms != nil {
 		ms.SetNetworkUp(up)
 	}
 }
@@ -319,6 +336,7 @@ func (n *Node) Stop() {
 	n.srv = nil
 	n.lc = nil
 	n.started = false
+	n.ready = false
 	n.mu.Unlock()
 	for _, f := range fwds {
 		f.cancel()
