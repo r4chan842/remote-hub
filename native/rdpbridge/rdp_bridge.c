@@ -9,6 +9,7 @@
 #include <winpr/thread.h>
 #include <winpr/wlog.h>
 #include <winpr/crypto.h>
+#include <winpr/string.h>
 
 #include <freerdp/freerdp.h>
 #include <freerdp/client.h>
@@ -235,12 +236,13 @@ static UINT rh_cliprdr_monitor_ready(CliprdrClientContext* clip,
                                      const CLIPRDR_MONITOR_READY* ready)
 {
 	CLIPRDR_GENERAL_CAPABILITY_SET cap = { 0 };
-	cap.capabilitySetType = CB_CAPS_TYPE_GENERAL;
-	cap.capabilitySetLength = 12;
+	cap.capabilitySetType = CB_CAPSTYPE_GENERAL;
+	cap.capabilitySetLength = CB_CAPSTYPE_GENERAL_LEN;
 	cap.version = CB_CAPS_VERSION_2;
 	cap.generalFlags = CB_USE_LONG_FORMAT_NAMES;
 
 	CLIPRDR_CAPABILITIES caps = { 0 };
+	ZeroMemory(&caps.common, sizeof(caps.common));
 	caps.cCapabilitiesSets = 1;
 	caps.capabilitySets = (CLIPRDR_CAPABILITY_SET*)&cap;
 	return clip->ClientCapabilities(clip, &caps);
@@ -257,9 +259,9 @@ static UINT rh_cliprdr_format_list(CliprdrClientContext* clip, const CLIPRDR_FOR
 	}
 
 	CLIPRDR_FORMAT_LIST_RESPONSE response = { 0 };
-	response.msgType = CB_FORMAT_LIST_RESPONSE;
-	response.msgFlags = CB_RESPONSE_OK;
-	response.dataLen = 0;
+	response.common.msgType = CB_FORMAT_LIST_RESPONSE;
+	response.common.msgFlags = CB_RESPONSE_OK;
+	response.common.dataLen = 0;
 	clip->ClientFormatListResponse(clip, &response);
 
 	if (!textAvailable)
@@ -274,11 +276,11 @@ static UINT rh_cliprdr_format_data_response(CliprdrClientContext* clip,
                                             const CLIPRDR_FORMAT_DATA_RESPONSE* response)
 {
 	rhContext* rh = (rhContext*)clip->custom;
-	if (response->msgFlags != CB_RESPONSE_OK || !response->requestedFormatData)
+	if (response->common.msgFlags != CB_RESPONSE_OK || !response->requestedFormatData)
 		return CHANNEL_RC_OK;
 
 	const BYTE* data = response->requestedFormatData;
-	UINT32 len = response->dataLen;
+	UINT32 len = response->common.dataLen;
 	if (len >= 2)
 	{
 		char utf8[8192];
@@ -292,9 +294,9 @@ static UINT rh_cliprdr_format_data_response(CliprdrClientContext* clip,
 	}
 
 	CLIPRDR_FORMAT_DATA_RESPONSE ack = { 0 };
-	ack.msgType = CB_FORMAT_DATA_RESPONSE;
-	ack.msgFlags = CB_RESPONSE_OK;
-	ack.dataLen = 0;
+	ack.common.msgType = CB_FORMAT_DATA_RESPONSE;
+	ack.common.msgFlags = CB_RESPONSE_OK;
+	ack.common.dataLen = 0;
 	ack.requestedFormatData = NULL;
 	return CHANNEL_RC_OK;
 }
@@ -304,14 +306,14 @@ static UINT rh_cliprdr_format_data_request(CliprdrClientContext* clip,
 {
 	rhContext* rh = (rhContext*)clip->custom;
 	CLIPRDR_FORMAT_DATA_RESPONSE response = { 0 };
-	response.msgType = CB_FORMAT_DATA_RESPONSE;
+	response.common.msgType = CB_FORMAT_DATA_RESPONSE;
 
 	pthread_mutex_lock(&rh->lock);
 	if (!atomic_load(&rh->hasClipboardText) || rh->pendingTextLen == 0)
 	{
 		pthread_mutex_unlock(&rh->lock);
-		response.msgFlags = CB_RESPONSE_FAIL;
-		response.dataLen = 0;
+		response.common.msgFlags = CB_RESPONSE_FAIL;
+		response.common.dataLen = 0;
 		response.requestedFormatData = NULL;
 		return clip->ClientFormatDataResponse(clip, &response);
 	}
@@ -323,14 +325,14 @@ static UINT rh_cliprdr_format_data_request(CliprdrClientContext* clip,
 	if (wideChars <= 0 || !wide)
 	{
 		free(wide);
-		response.msgFlags = CB_RESPONSE_FAIL;
-		response.dataLen = 0;
+		response.common.msgFlags = CB_RESPONSE_FAIL;
+		response.common.dataLen = 0;
 		response.requestedFormatData = NULL;
 		return clip->ClientFormatDataResponse(clip, &response);
 	}
 
-	response.msgFlags = CB_RESPONSE_OK;
-	response.dataLen = (UINT32)(wideChars + 1) * sizeof(WCHAR);
+	response.common.msgFlags = CB_RESPONSE_OK;
+	response.common.dataLen = (UINT32)(wideChars + 1) * sizeof(WCHAR);
 	response.requestedFormatData = (const BYTE*)wide;
 	UINT rc = clip->ClientFormatDataResponse(clip, &response);
 	free(wide);
@@ -919,8 +921,9 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeSendClipboard(
 
 	CLIPRDR_FORMAT_LIST list;
 	ZeroMemory(&list, sizeof(list));
-	list.msgType = CB_FORMAT_LIST;
-	list.msgFlags = CB_FORMAT_ASCII;
+	list.common.msgType = CB_FORMAT_LIST;
+	list.common.msgFlags = CB_ASCII_NAMES;
+	list.common.dataLen = 0;
 	list.numFormats = 2;
 	list.formats = formats;
 	return clip->ClientFormatList(clip, &list) == CHANNEL_RC_OK ? JNI_TRUE : JNI_FALSE;
