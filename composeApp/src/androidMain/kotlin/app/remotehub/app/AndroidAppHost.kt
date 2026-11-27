@@ -251,7 +251,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             visible = state.keyboardVisible,
                             onText = { controller.typeRemote(active.id, it) },
                             onScancode = { code, down -> controller.remoteKey(active.id, code, down) },
-                            onPaste = { controller.pushClipboard(active.id) },
+                            onPaste = { controller.pasteRemote(active.id) },
                             onImeVisibility = { controller.onImeVisibility(it) },
                             modifier = Modifier.align(Alignment.BottomStart).size(1.dp),
                         )

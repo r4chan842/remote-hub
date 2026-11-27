@@ -511,6 +511,12 @@ class RdpSession(
         runCatching { NativeRdp.key(handle, scancode, false) }
     }
 
+    /** Hold the modifiers, tap the key, release in reverse order. */
+    fun pressChord(vararg scancodes: Int) = runCatching {
+        scancodes.forEach { NativeRdp.key(handle, it, true) }
+        scancodes.reversed().forEach { NativeRdp.key(handle, it, false) }
+    }
+
     fun sendCtrlAltDel() = runCatching {
         NativeRdp.key(handle, 0x1D, true)
         NativeRdp.key(handle, 0x38, true)

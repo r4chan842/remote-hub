@@ -34,6 +34,7 @@ import app.remotehub.github.StoredServer
 import app.remotehub.i18n.stringsFor
 import app.remotehub.net.TailscaleNode
 import app.remotehub.net.TailscaleVpnService
+import app.remotehub.rdp.RdpKeys
 import app.remotehub.rdp.RdpSession
 import app.remotehub.server.ProvisionEvent
 import app.remotehub.server.ProvisionRequest
@@ -1217,8 +1218,42 @@ class SessionController(
             publish(state.copy(error = context.getString(R.string.err_clipboard_empty)))
             return
         }
-        val sent = rdpSessions[serverId]?.sendClipboard(text) ?: false
+        val session = rdpSessions[serverId]
+        val sent = session?.sendClipboard(text) ?: false
+        if (sent && session != null) {
+            // Publishing a format list only puts the text on the host clipboard.
+            // Without the chord nothing is inserted, which is why the toolbar
+            // button looked like it did nothing.
+            scope.launch {
+                delay(220)
+                session.pressChord(RdpKeys.LCTRL, 0x2F) // V
+            }
+        }
         publish(state.copy(toast = if (sent) context.getString(R.string.clipboard_sent) else context.getString(R.string.clipboard_pending)))
+    }
+
+    /**
+     * Paste from the phone keyboard.
+     *
+     * This types the text instead of using cliprdr: an IME paste has to land at
+     * the caret immediately, and the clipboard channel is asynchronous -- the
+     * host may not have fetched the format list yet when Ctrl+V arrives.
+     */
+    fun pasteRemote(serverId: String) {
+        val manager = context.getSystemService(ClipboardManager::class.java)
+        val text = manager?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
+        if (text.isNullOrEmpty()) {
+            publish(state.copy(error = context.getString(R.string.err_clipboard_empty)))
+            return
+        }
+        val session = rdpSessions[serverId] ?: return
+        scope.launch(Dispatchers.IO) {
+            // Chunk so a long paste cannot flood the input queue in one burst.
+            text.chunked(64).forEach { chunk ->
+                session.typeText(chunk)
+                delay(8)
+            }
+        }
     }
 
     fun sendCtrlAltDel(serverId: String) {
