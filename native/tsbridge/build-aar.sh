@@ -58,6 +58,9 @@ else:
 PYEOF
 grep -n 'case "ios", "darwin", "android"' "$TSNET_FILE"
 
+# anet reaches net.zoneCache through go:linkname, which the linker rejects by
+# default since Go 1.23. -checklinkname=0 is the upstream-documented workaround.
+#
 # Compile the Android-only sources before the long gomobile step so a mistake in
 # netmon_android.go surfaces in seconds rather than minutes.
 GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...
@@ -67,7 +70,7 @@ gomobile bind \
   -target=android/arm64,android/arm \
   -androidapi 26 \
   -javapkg app.remotehub \
-  -ldflags="-s -w -buildid=" \
+  -ldflags="-s -w -buildid= -checklinkname=0" \
   -trimpath \
   -o out/tsbridge.aar \
   ./
