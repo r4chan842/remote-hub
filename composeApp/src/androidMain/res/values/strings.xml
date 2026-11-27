@@ -20,4 +20,6 @@
     <string name="clipboard_sent">Clipboard sent to the server.</string>
     <string name="clipboard_pending">The clipboard channel is not ready yet.</string>
     <string name="backup_stored">Encrypted backup saved to your repository.</string>
+    <string name="vpn_notification_title">Device VPN</string>
+    <string name="vpn_notification_stop">Stop VPN</string>
 </resources>

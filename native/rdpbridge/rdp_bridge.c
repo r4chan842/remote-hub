@@ -63,6 +63,7 @@ typedef struct
 	UINT32 width;
 	UINT32 height;
 	UINT32 stride;
+	size_t capacity;
 	atomic_int dirty;
 	atomic_int connected;
 	atomic_int stopRequested;
@@ -175,6 +176,39 @@ static rhContext* rh_from_context(rdpContext* context)
 	return (rhContext*)context;
 }
 
+/* Copy the GDI framebuffer into our tightly packed RGBA buffer, growing it when
+ * the host resolution changes. The caller holds rh->lock. Source and destination
+ * strides are kept independent: GDI aligns its rows, Android bitmaps do not. */
+static void rh_blit_locked(rhContext* rh, rdpGdi* gdi)
+{
+	if (!gdi || !gdi->primary_buffer || gdi->width <= 0 || gdi->height <= 0)
+		return;
+
+	const UINT32 w = (UINT32)gdi->width;
+	const UINT32 h = (UINT32)gdi->height;
+	const size_t needed = (size_t)w * (size_t)h * 4;
+
+	if (!rh->pixels || rh->capacity < needed)
+	{
+		uint8_t* grown = (uint8_t*)realloc(rh->pixels, needed);
+		if (!grown)
+			return;
+		memset(grown, 0, needed);
+		rh->pixels = grown;
+		rh->capacity = needed;
+	}
+
+	const size_t dstStride = (size_t)w * 4;
+	const size_t srcStride = (size_t)gdi->stride;
+	const uint8_t* src = gdi->primary_buffer;
+	for (UINT32 y = 0; y < h; y++)
+		memcpy(rh->pixels + (size_t)y * dstStride, src + (size_t)y * srcStride, dstStride);
+
+	rh->width = w;
+	rh->height = h;
+	rh->stride = (UINT32)dstStride;
+}
+
 static BOOL rh_begin_paint(rdpContext* context)
 {
 	rdpGdi* gdi = context->gdi;
@@ -198,17 +232,7 @@ static BOOL rh_end_paint(rdpContext* context)
 		return TRUE;
 
 	pthread_mutex_lock(&rh->lock);
-	if (rh->pixels && gdi->primary_buffer)
-	{
-		size_t copyBytes = (size_t)gdi->stride * gdi->height;
-		size_t capacity = (size_t)rh->stride * rh->height;
-		if (copyBytes > capacity)
-			copyBytes = capacity;
-		memcpy(rh->pixels, gdi->primary_buffer, copyBytes);
-		rh->width = gdi->width;
-		rh->height = gdi->height;
-		rh->stride = gdi->stride;
-	}
+	rh_blit_locked(rh, gdi);
 	pthread_mutex_unlock(&rh->lock);
 
 	atomic_fetch_add(&rh->frames, 1);
@@ -223,12 +247,23 @@ static BOOL rh_desktop_resize(rdpContext* context)
 	rdpGdi* gdi = context->gdi;
 	if (!gdi)
 		return FALSE;
+
+	/* The host changed resolution. GDI must reallocate its framebuffer before
+	 * anything else paints, otherwise every surface update is clipped against the
+	 * old size and the screen stays empty for the rest of the session. */
+	const UINT32 width = freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopWidth);
+	const UINT32 height = freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopHeight);
+	if (width > 0 && height > 0 && !gdi_resize(gdi, width, height))
+	{
+		LOGE("gdi_resize to %ux%u failed", width, height);
+		return FALSE;
+	}
+
 	pthread_mutex_lock(&rh->lock);
-	rh->width = gdi->width;
-	rh->height = gdi->height;
-	rh->stride = gdi->stride;
+	rh_blit_locked(rh, gdi);
 	pthread_mutex_unlock(&rh->lock);
 	atomic_store(&rh->dirty, 1);
+	LOGI("desktop resized to %ux%u", gdi->width, gdi->height);
 	rh_notify_resize(rh, gdi->width, gdi->height);
 	return TRUE;
 }
@@ -461,7 +496,9 @@ static BOOL rh_post_connect(freerdp* instance)
 	rhContext* rh = rh_from_context(instance->context);
 	rdpUpdate* update = instance->context->update;
 
-	if (!gdi_init(instance, PIXEL_FORMAT_BGRA32))
+	/* RGBX32 matches Android's RGBA_8888 byte order, which is what nativeRender
+	 * memcpy's into. BGRA32 would swap red and blue. */
+	if (!gdi_init(instance, PIXEL_FORMAT_RGBX32))
 		return FALSE;
 
 	rdpGdi* gdi = instance->context->gdi;
@@ -470,17 +507,7 @@ static BOOL rh_post_connect(freerdp* instance)
 	update->DesktopResize = rh_desktop_resize;
 
 	pthread_mutex_lock(&rh->lock);
-	rh->width = gdi->width;
-	rh->height = gdi->height;
-	rh->stride = gdi->stride;
-	if (rh->pixels && gdi->primary_buffer)
-	{
-		size_t copyBytes = (size_t)gdi->stride * gdi->height;
-		size_t capacity = (size_t)rh->stride * rh->height;
-		if (copyBytes > capacity)
-			copyBytes = capacity;
-		memcpy(rh->pixels, gdi->primary_buffer, copyBytes);
-	}
+	rh_blit_locked(rh, gdi);
 	pthread_mutex_unlock(&rh->lock);
 
 	atomic_store(&rh->connected, 1);
@@ -679,9 +706,15 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeConnect(
 	freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, gfx ? TRUE : FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_GfxH264, h264 ? TRUE : FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, h264 ? TRUE : FALSE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, gfx ? TRUE : FALSE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxThinClient, gfx ? TRUE : FALSE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxSmallCache, TRUE);
+	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_GfxPlanar, TRUE);
+	/* THINCLIENT advertises an H.264-only thin client and SMALL_CACHE shrinks the
+	 * surface cache to 20 MB. Neither is needed here, and both push Windows towards
+	 * codecs this build may not decode. Advertising a full cache lets the server use
+	 * RemoteFX or planar, which libfreerdp decodes on its own. */
+	freerdp_settings_set_bool(settings, FreeRDP_GfxThinClient, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_GfxSmallCache, FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_RemoteFxCodec, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_NSCodec, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_BitmapCacheEnabled, TRUE);
@@ -762,18 +795,20 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeAllocFrame(JNI
 	rhContext* rh = (rhContext*)(intptr_t)handle;
 	if (!rh || w <= 0 || h <= 0)
 		return JNI_FALSE;
+	const size_t needed = (size_t)w * (size_t)h * 4;
 	pthread_mutex_lock(&rh->lock);
-	uint8_t* buffer = (uint8_t*)realloc(rh->pixels, (size_t)w * (size_t)h * 4);
+	uint8_t* buffer = (uint8_t*)realloc(rh->pixels, needed);
 	if (!buffer)
 	{
 		pthread_mutex_unlock(&rh->lock);
 		return JNI_FALSE;
 	}
 	rh->pixels = buffer;
+	rh->capacity = needed;
 	rh->width = (UINT32)w;
 	rh->height = (UINT32)h;
 	rh->stride = (UINT32)w * 4;
-	memset(buffer, 0, (size_t)w * (size_t)h * 4);
+	memset(buffer, 0, needed);
 	pthread_mutex_unlock(&rh->lock);
 	atomic_store(&rh->dirty, 1);
 	return JNI_TRUE;

@@ -8,7 +8,7 @@ import app.remotehub.domain.TailnetStatus
 import app.remotehub.server.SessionWorkflow
 
 /** The linear path a new user walks: checklist, create, progress, detail, remote. */
-enum class AppScreen { Setup, Create, Progress, Detail, Remote, Settings, Guide, Logs }
+enum class AppScreen { Setup, Create, Progress, Detail, Remote, Servers, Network, Settings, Guide, Logs }
 
 /** The two things that must be real before a server can be created. */
 enum class SetupItem { GitHub, Network }
@@ -48,6 +48,14 @@ data class AppState(
     val servers: List<ServerSession> = emptyList(),
     val passwordVisible: Boolean = false,
     val trackpadMode: Boolean = false,
+    // The desktop owns the whole screen when this is set; it never disconnects.
+    val remoteFullscreen: Boolean = false,
+    val remoteConnecting: Boolean = false,
+
+    // device-wide tailnet
+    val deviceVpn: Boolean = false,
+    val vpnBusy: Boolean = false,
+    val vpnInterface: String = "",
 
     // settings
     val themeMode: Int = 0,
@@ -93,4 +101,10 @@ sealed interface SideEffect {
     data class Copy(val label: String, val value: String) : SideEffect
     data class Notify(val title: String, val body: String) : SideEffect
     data class ShareFile(val path: String, val mimeType: String) : SideEffect
+
+    /** Android must show the system VPN consent dialog from an Activity. */
+    data object RequestVpnConsent : SideEffect
+
+    /** Hide the system bars while the remote desktop is on screen. */
+    data class Immersive(val enabled: Boolean) : SideEffect
 }

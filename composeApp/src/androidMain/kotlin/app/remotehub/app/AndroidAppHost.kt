@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -49,6 +50,8 @@ import app.remotehub.ui.FindingAddressContent
 import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
 import app.remotehub.ui.LogsContent
+import app.remotehub.ui.NetworkContent
+import app.remotehub.ui.ServersContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
 import app.remotehub.ui.SessionDetailContent
@@ -70,6 +73,14 @@ import kotlinx.coroutines.launch
  * beside that path and never interrupt it.
  */
 class AndroidAppHost(private val activity: ComponentActivity) {
+    /** Only an Activity can show the system VPN dialog, so the Activity owns this. */
+    var requestVpnConsent: (Intent) -> Unit = {}
+
+    /** Hides the system bars while the remote desktop is fullscreen. */
+    var setImmersive: (Boolean) -> Unit = {}
+
+    fun onVpnConsent(granted: Boolean) = controller.onVpnConsent(granted)
+
     // An unhandled failure in a background job is recorded and shown, never fatal.
     private val failures = CoroutineExceptionHandler { _, error ->
         Diagnostics.error("app", "background task failed: ${error.message ?: error.javaClass.simpleName}", error)
@@ -111,6 +122,11 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     activity.startActivity(Intent.createChooser(send, effect.path.substringAfterLast('/')))
                 }.onFailure { Diagnostics.error("app", "sharing the log failed", it) }
             }
+            is SideEffect.RequestVpnConsent -> {
+                val consent = app.remotehub.net.TailscaleVpnService.consentIntent(activity)
+                if (consent == null) controller.onVpnConsent(true) else requestVpnConsent(consent)
+            }
+            is SideEffect.Immersive -> setImmersive(effect.enabled)
         }
     }
 
@@ -179,10 +195,25 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                 LocalLayoutDirection provides if (strings.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
             ) {
                 val active = state.activeServer
+                val devices by produceState(
+                    initialValue = emptyList<app.remotehub.ui.TailnetDevice>(),
+                    state.screen,
+                    state.tailnet.state,
+                ) {
+                    value = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        runCatching { controller.tailnetDevices() }.getOrDefault(emptyList())
+                    }
+                }
 
                 // Step 5 is deliberately chrome-free: the desktop owns the whole screen.
                 if (state.screen == AppScreen.Remote && active != null) {
-                    BackHandler { controller.disconnectRemote(active.id) }
+                    BackHandler {
+                        if (state.remoteFullscreen) {
+                            controller.toggleRemoteFullscreen()
+                        } else {
+                            controller.disconnectRemote(active.id)
+                        }
+                    }
                     Box(Modifier.fillMaxSize()) {
                         RemoteContent(
                             server = active,
@@ -192,7 +223,10 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             onClipboard = { controller.pushClipboard(active.id) },
                             onCtrlAltDel = { controller.sendCtrlAltDel(active.id) },
                             onToggleInputMode = { controller.toggleInputMode() },
-                            onFullscreen = { controller.disconnectRemote(active.id) },
+                            onFullscreen = { controller.toggleRemoteFullscreen() },
+                            fullscreen = state.remoteFullscreen,
+                            connecting = state.remoteConnecting,
+                            hostAspectRatio = controller.remoteAspectRatio(active.id),
                             desktopSurface = {
                                 if (active.connection?.address.isNullOrBlank()) {
                                     FindingAddressContent()
@@ -225,17 +259,21 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     AppScreen.Guide -> strings.guides
                     AppScreen.Logs -> strings.logsTitle
                     AppScreen.Remote -> strings.remoteDesktop
+                    AppScreen.Servers -> strings.serversTitle
+                    AppScreen.Network -> strings.networkScreenTitle
                 }
                 val subtitle = when (state.screen) {
                     AppScreen.Setup -> strings.setupSubtitle
                     AppScreen.Create -> strings.createSubtitle
                     AppScreen.Progress -> strings.progressSubtitle
+                    AppScreen.Servers -> strings.serversSubtitle
+                    AppScreen.Network -> strings.networkScreenSubtitle
                     else -> null
                 }
                 val back: (@Composable () -> Unit)? = when (state.screen) {
                     AppScreen.Create -> { { BackIcon(onClick = { controller.goSetup() }) } }
                     AppScreen.Progress -> { { BackIcon(onClick = { controller.cancelProvision() }) } }
-                    AppScreen.Detail -> { { BackIcon(onClick = { controller.goSetup() }) } }
+                    AppScreen.Detail -> { { BackIcon(onClick = { controller.goServers() }) } }
                     AppScreen.Settings -> { { BackIcon(onClick = { controller.goSetup() }) } }
                     AppScreen.Guide -> { { BackIcon(onClick = { controller.closeGuide() }) } }
                     AppScreen.Logs -> { { BackIcon(onClick = { controller.closeLogs() }) } }
@@ -244,18 +282,27 @@ class AndroidAppHost(private val activity: ComponentActivity) {
 
                 when (state.screen) {
                     AppScreen.Create -> BackHandler { controller.goSetup() }
-                    AppScreen.Detail, AppScreen.Settings -> BackHandler { controller.goSetup() }
+                    AppScreen.Detail -> BackHandler { controller.goServers() }
+                    AppScreen.Settings -> BackHandler { controller.goSetup() }
+                    AppScreen.Servers, AppScreen.Network -> BackHandler { controller.goSetup() }
                     AppScreen.Guide -> BackHandler { controller.closeGuide() }
                     AppScreen.Logs -> BackHandler { controller.closeLogs() }
                     else -> Unit
                 }
 
                 AppShell(
-                    selected = if (state.screen == AppScreen.Settings) Destination.Settings else Destination.Dashboard,
+                    selected = when (state.screen) {
+                        AppScreen.Settings, AppScreen.Guide -> Destination.Settings
+                        AppScreen.Servers, AppScreen.Detail -> Destination.Servers
+                        AppScreen.Network -> Destination.Network
+                        else -> Destination.Dashboard
+                    },
                     onSelect = { destination ->
                         when (destination) {
                             Destination.Settings -> controller.goSettings()
-                            else -> controller.goSetup()
+                            Destination.Servers -> controller.goServers()
+                            Destination.Network -> controller.goNetwork()
+                            Destination.Dashboard -> controller.goSetup()
                         }
                     },
                     expanded = false,
@@ -263,11 +310,21 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     subtitle = subtitle,
                     navigationIcon = back,
                     actions = {
-                        if (state.screen == AppScreen.Setup) {
+                        if (state.screen == AppScreen.Network) {
+                            IconButton(onClick = { controller.openLogs("network") }) {
+                                Symbol(Symbols.description, size = 22.dp)
+                            }
+                        }
+                        if (state.screen == AppScreen.Setup || state.screen == AppScreen.Servers) {
                             IconButton(onClick = { controller.goSettings() }) {
                                 Symbol(Symbols.settings, size = 22.dp)
                             }
                         }
+                    },
+                    floatingAction = if (state.screen == AppScreen.Servers) {
+                        { app.remotehub.ui.NewServerFab(onClick = { controller.startCreate() }) }
+                    } else {
+                        null
                     },
                 ) { padding ->
                     val content = Modifier.padding(padding).padding(vertical = 4.dp)
@@ -355,6 +412,30 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             onClear = { controller.clearLogs() },
                             onRefresh = { controller.refreshLogs() },
                             onDismissCrash = { controller.dismissCrashNotice() },
+                            modifier = content,
+                        )
+
+                        AppScreen.Servers -> ServersContent(
+                            servers = state.servers.sortedByDescending { it.startedAtEpochMs },
+                            padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                            onOpen = { controller.openServer(it) },
+                            onConnect = { controller.connectRemote(it) },
+                            onRestart = { controller.restartSession(it) },
+                            onCreate = { controller.startCreate() },
+                            modifier = content,
+                        )
+
+                        AppScreen.Network -> NetworkContent(
+                            tailnet = state.tailnet,
+                            devices = devices,
+                            deviceVpn = state.deviceVpn,
+                            vpnBusy = state.vpnBusy,
+                            vpnInterface = state.vpnInterface,
+                            padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                            onToggleVpn = { controller.toggleDeviceVpn() },
+                            onConnect = { controller.goSetup() },
+                            onDisconnect = { controller.disconnectNetwork() },
+                            onCopy = { label, value -> controller.copyValue(label, value) },
                             modifier = content,
                         )
 

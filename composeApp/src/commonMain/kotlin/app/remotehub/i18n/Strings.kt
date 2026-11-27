@@ -346,6 +346,34 @@ class AppStrings(
     val errGenericHint: String = values.getValue("errGenericHint")
     val errCryptoTitle: String = values.getValue("errCryptoTitle")
     val errCryptoHint: String = values.getValue("errCryptoHint")
+    val serversTitle: String = values.getValue("serversTitle")
+    val serversSubtitle: String = values.getValue("serversSubtitle")
+    val serversEmpty: String = values.getValue("serversEmpty")
+    val serversEmptyHint: String = values.getValue("serversEmptyHint")
+    val networkScreenTitle: String = values.getValue("networkScreenTitle")
+    val networkScreenSubtitle: String = values.getValue("networkScreenSubtitle")
+    val deviceAccess: String = values.getValue("deviceAccess")
+    val deviceAccessHint: String = values.getValue("deviceAccessHint")
+    val vpnOn: String = values.getValue("vpnOn")
+    val vpnOff: String = values.getValue("vpnOff")
+    val vpnEnable: String = values.getValue("vpnEnable")
+    val vpnDisable: String = values.getValue("vpnDisable")
+    val vpnWorking: String = values.getValue("vpnWorking")
+    val vpnDenied: String = values.getValue("vpnDenied")
+    val vpnConflict: String = values.getValue("vpnConflict")
+    val vpnScope: String = values.getValue("vpnScope")
+    val vpnInterface: String = values.getValue("vpnInterface")
+    val restartServer: String = values.getValue("restartServer")
+    val restartHint: String = values.getValue("restartHint")
+    val restarting: String = values.getValue("restarting")
+    val remoteConnecting: String = values.getValue("remoteConnecting")
+    val remoteHandshake: String = values.getValue("remoteHandshake")
+    val exitFullscreen: String = values.getValue("exitFullscreen")
+    val brandTagline: String = values.getValue("brandTagline")
+    val errVpnTitle: String = values.getValue("errVpnTitle")
+    val errVpnHint: String = values.getValue("errVpnHint")
+    val peersTitle: String = values.getValue("peersTitle")
+    val peersEmpty: String = values.getValue("peersEmpty")
 }
 
 /** Every key a locale must provide. */
@@ -408,9 +436,65 @@ val requiredKeys: List<String> = listOf(
     "errGithubRateHint", "errStorageTitle", "errStorageHint", "errRdpTitle", "errRdpHint",
     "errGenericTitle", "errGenericHint",
     "errCryptoTitle", "errCryptoHint",
+    "serversTitle",
+    "serversSubtitle",
+    "serversEmpty",
+    "serversEmptyHint",
+    "networkScreenTitle",
+    "networkScreenSubtitle",
+    "deviceAccess",
+    "deviceAccessHint",
+    "vpnOn",
+    "vpnOff",
+    "vpnEnable",
+    "vpnDisable",
+    "vpnWorking",
+    "vpnDenied",
+    "vpnConflict",
+    "vpnScope",
+    "vpnInterface",
+    "restartServer",
+    "restartHint",
+    "restarting",
+    "remoteConnecting",
+    "remoteHandshake",
+    "exitFullscreen",
+    "brandTagline",
+    "errVpnTitle",
+    "errVpnHint",
+    "peersTitle",
+    "peersEmpty",
 )
 
 val Persian = AppStrings("fa", true, mapOf(
+    "serversTitle" to "سرورها",
+    "serversSubtitle" to "همهٔ نشست‌هایی که ساخته‌اید",
+    "serversEmpty" to "هنوز سروری نساخته‌اید",
+    "serversEmptyHint" to "از خانه یک سرور بسازید؛ اینجا فهرست می‌شود.",
+    "networkScreenTitle" to "شبکهٔ خصوصی",
+    "networkScreenSubtitle" to "وضعیت تانل و دسترسی کل دستگاه",
+    "deviceAccess" to "دسترسی کل گوشی",
+    "deviceAccessHint" to "با روشن کردن این گزینه، تانل به یک VPN واقعی اندروید تبدیل می‌شود و هر برنامه‌ای (مثل aRDP) می‌تواند به نشانی‌های ۱۰۰.x وصل شود.",
+    "vpnOn" to "روشن",
+    "vpnOff" to "خاموش",
+    "vpnEnable" to "روشن کردن VPN دستگاه",
+    "vpnDisable" to "خاموش کردن VPN دستگاه",
+    "vpnWorking" to "در حال ساختن رابط VPN…",
+    "vpnDenied" to "اجازهٔ VPN داده نشد.",
+    "vpnConflict" to "اندروید در هر لحظه فقط یک VPN را می‌پذیرد. اگر VPN دیگری روشن است، اول آن را خاموش کنید.",
+    "vpnScope" to "فقط بازهٔ ۱۰۰.۶۴.۰.۰/۱۰ وارد تانل می‌شود؛ بقیهٔ ترافیک دست‌نخورده می‌ماند.",
+    "vpnInterface" to "رابط سیستمی",
+    "restartServer" to "اجرای دوبارهٔ همین نشست",
+    "restartHint" to "همان ورک‌فلو با همان شناسه دوباره اجرا می‌شود؛ سرور تازه‌ای ساخته نمی‌شود و رمز عوض نمی‌شود.",
+    "restarting" to "در حال اجرای دوباره…",
+    "remoteConnecting" to "در حال برقراری نشست ویندوز…",
+    "remoteHandshake" to "احراز هویت NLA و دریافت تصویر",
+    "exitFullscreen" to "خروج از تمام‌صفحه",
+    "brandTagline" to "دسکتاپ ویندوز، روی تانل خودتان",
+    "errVpnTitle" to "رابط VPN ساخته نشد",
+    "errVpnHint" to "VPN دیگری را خاموش کنید یا اجازهٔ VPN را دوباره بدهید؛ اپ به حالت درون‌برنامه برمی‌گردد.",
+    "peersTitle" to "دستگاه‌های تانل",
+    "peersEmpty" to "هنوز دستگاهی دیده نمی‌شود",
     "errCryptoTitle" to "موتور رمزنگاری روی این دستگاه بارگذاری نشد",
     "errCryptoHint" to "این نسخه را حذف و تازه نصب کنید؛ اگر تکرار شد، لاگ را بفرستید.",
     "logsTitle" to "لاگ‌ها",
@@ -743,6 +827,34 @@ val Persian = AppStrings("fa", true, mapOf(
 ))
 
 val English = AppStrings("en", false, mapOf(
+    "serversTitle" to "Servers",
+    "serversSubtitle" to "Every session you have created",
+    "serversEmpty" to "No servers yet",
+    "serversEmptyHint" to "Create one from Home and it will be listed here.",
+    "networkScreenTitle" to "Private network",
+    "networkScreenSubtitle" to "Tunnel status and device-wide access",
+    "deviceAccess" to "Whole-device access",
+    "deviceAccessHint" to "Turning this on promotes the tunnel to a real Android VPN, so any app (aRDP, for example) can reach 100.x addresses.",
+    "vpnOn" to "On",
+    "vpnOff" to "Off",
+    "vpnEnable" to "Enable device VPN",
+    "vpnDisable" to "Disable device VPN",
+    "vpnWorking" to "Building the VPN interface…",
+    "vpnDenied" to "VPN permission was declined.",
+    "vpnConflict" to "Android allows one VPN at a time. Turn off any other VPN first.",
+    "vpnScope" to "Only 100.64.0.0/10 enters the tunnel; the rest of your traffic is untouched.",
+    "vpnInterface" to "System interface",
+    "restartServer" to "Restart this session",
+    "restartHint" to "The same workflow run is re-run with the same id: no second server, no new password.",
+    "restarting" to "Restarting…",
+    "remoteConnecting" to "Starting the Windows session…",
+    "remoteHandshake" to "NLA sign-in and first frame",
+    "exitFullscreen" to "Exit fullscreen",
+    "brandTagline" to "A Windows desktop on your own tailnet",
+    "errVpnTitle" to "The VPN interface could not be created",
+    "errVpnHint" to "Turn off the other VPN or grant the permission again; the app falls back to its in-app tunnel.",
+    "peersTitle" to "Tailnet devices",
+    "peersEmpty" to "No devices visible yet",
     "errCryptoTitle" to "The encryption engine could not load on this device",
     "errCryptoHint" to "Uninstall and reinstall this build; if it repeats, send the log.",
     "logsTitle" to "Logs",
@@ -1075,6 +1187,34 @@ val English = AppStrings("en", false, mapOf(
 ))
 
 val Arabic = AppStrings("ar", true, mapOf(
+    "serversTitle" to "الخوادم",
+    "serversSubtitle" to "كل الجلسات التي أنشأتها",
+    "serversEmpty" to "لا توجد خوادم بعد",
+    "serversEmptyHint" to "أنشئ خادمًا من الصفحة الرئيسية ليظهر هنا.",
+    "networkScreenTitle" to "الشبكة الخاصة",
+    "networkScreenSubtitle" to "حالة النفق ووصول الجهاز بالكامل",
+    "deviceAccess" to "وصول الجهاز بالكامل",
+    "deviceAccessHint" to "عند تشغيل هذا الخيار يتحول النفق إلى VPN حقيقي في أندرويد، ليصل أي تطبيق (مثل aRDP) إلى عناوين 100.x.",
+    "vpnOn" to "مُشغّل",
+    "vpnOff" to "متوقف",
+    "vpnEnable" to "تشغيل VPN الجهاز",
+    "vpnDisable" to "إيقاف VPN الجهاز",
+    "vpnWorking" to "جارٍ إنشاء واجهة VPN…",
+    "vpnDenied" to "تم رفض إذن VPN.",
+    "vpnConflict" to "يسمح أندرويد بـ VPN واحد فقط في الوقت نفسه. أوقف أي VPN آخر أولًا.",
+    "vpnScope" to "يدخل النفقَ النطاقُ 100.64.0.0/10 فقط؛ وتبقى بقية حركة البيانات كما هي.",
+    "vpnInterface" to "واجهة النظام",
+    "restartServer" to "إعادة تشغيل الجلسة نفسها",
+    "restartHint" to "تُعاد تشغيل نفس جلسة سير العمل بالمعرّف نفسه: لا خادم ثانٍ ولا كلمة مرور جديدة.",
+    "restarting" to "جارٍ إعادة التشغيل…",
+    "remoteConnecting" to "جارٍ بدء جلسة ويندوز…",
+    "remoteHandshake" to "تسجيل دخول NLA واستلام أول إطار",
+    "exitFullscreen" to "الخروج من ملء الشاشة",
+    "brandTagline" to "سطح مكتب ويندوز على شبكتك الخاصة",
+    "errVpnTitle" to "تعذّر إنشاء واجهة VPN",
+    "errVpnHint" to "أوقف VPN الآخر أو امنح الإذن مرة أخرى؛ سيعود التطبيق إلى النفق الداخلي.",
+    "peersTitle" to "أجهزة الشبكة",
+    "peersEmpty" to "لا توجد أجهزة مرئية بعد",
     "errCryptoTitle" to "تعذّر تحميل محرك التشفير على هذا الجهاز",
     "errCryptoHint" to "احذف هذا الإصدار وثبّته من جديد؛ إذا تكرر الأمر فأرسل السجل.",
     "logsTitle" to "السجلات",

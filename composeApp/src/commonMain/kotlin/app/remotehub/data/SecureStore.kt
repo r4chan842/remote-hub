@@ -21,5 +21,9 @@ object StoreKeys {
     const val THEME = "settings.theme"
     const val WARNING_MINUTES = "settings.warning"
     const val SERVERS = "servers.json"
+    const val DEVICE_VPN = "tailscale.devicevpn"
+    const val TRACKPAD = "settings.trackpad"
+    const val LAST_SERVER = "session.lastserver"
+    const val LAST_SCREEN = "session.lastscreen"
     const val BACKUP_PASSPHRASE = "backup.passphrase"
 }

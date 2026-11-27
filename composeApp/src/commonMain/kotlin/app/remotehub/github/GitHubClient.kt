@@ -135,6 +135,23 @@ class GitHubClient(
         )
     }
 
+    /**
+     * Re-runs an existing run instead of dispatching a new one. GitHub keeps the run
+     * id, the run number and the original inputs, so the session id, the tailnet
+     * hostname and the repository secrets all stay the same; only a new attempt is
+     * added. That is what makes "restart" feel like restarting the same server.
+     *
+     * POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun -> 201
+     */
+    suspend fun rerun(owner: String, repo: String, runId: Long) {
+        ensureSuccess(request("POST", "/repos/$owner/$repo/actions/runs/$runId/rerun"))
+    }
+
+    /** Re-runs only the jobs that did not succeed, keeping the successful ones. */
+    suspend fun rerunFailed(owner: String, repo: String, runId: Long) {
+        ensureSuccess(request("POST", "/repos/$owner/$repo/actions/runs/$runId/rerun-failed-jobs"))
+    }
+
     suspend fun contentSha(owner: String, repo: String, path: String): String? {
         val response = request("GET", "/repos/$owner/$repo/contents/$path")
         if (response.status.value == 404) return null

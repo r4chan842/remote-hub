@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -30,7 +32,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import app.remotehub.design.CornerRadius
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
 import app.remotehub.i18n.AppStrings
@@ -142,13 +146,26 @@ fun AppShell(
             containerColor = scheme.surface,
             topBar = bar,
             bottomBar = {
-                NavigationBar(containerColor = scheme.surfaceContainer, contentColor = scheme.onSurfaceVariant) {
+                NavigationBar(
+                    containerColor = scheme.surfaceContainer,
+                    contentColor = scheme.onSurfaceVariant,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.clip(CornerRadius.barTop),
+                ) {
                     Destination.entries.forEach { destination ->
+                        val active = destination == selected
                         NavigationBarItem(
-                            selected = destination == selected,
+                            selected = active,
                             onClick = { onSelect(destination) },
-                            icon = { Symbol(destination.glyph(), size = 24.dp) },
-                            label = { Text(destination.label(s), style = MaterialTheme.typography.labelMedium) },
+                            icon = { Symbol(destination.glyph(), size = 24.dp, filled = active) },
+                            label = { Text(destination.label(s), style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = scheme.onSecondaryContainer,
+                                selectedTextColor = scheme.onSurface,
+                                indicatorColor = scheme.secondaryContainer,
+                                unselectedIconColor = scheme.onSurfaceVariant,
+                                unselectedTextColor = scheme.onSurfaceVariant,
+                            ),
                         )
                     }
                 }
@@ -164,6 +181,8 @@ fun NewServerFab(onClick: () -> Unit, extended: Boolean = false) {
     val s = LocalStrings.current
     FloatingActionButton(
         onClick = onClick,
+        shape = CornerRadius.largeIncreased,
+        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp),
         containerColor = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     ) {

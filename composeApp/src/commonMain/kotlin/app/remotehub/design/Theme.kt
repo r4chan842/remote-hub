@@ -1,6 +1,5 @@
 package app.remotehub.design
 
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -16,7 +15,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.remotehub.resources.Res
-import app.remotehub.resources.material_symbols
+import app.remotehub.resources.material_symbols_outlined
+import app.remotehub.resources.material_symbols_filled
 import app.remotehub.resources.vazirmatn_bold
 import app.remotehub.resources.vazirmatn_medium
 import app.remotehub.resources.vazirmatn_regular
@@ -60,7 +60,6 @@ data class StatusColors(
     }
 }
 
-val LocalSymbolFont = staticCompositionLocalOf<FontFamily> { FontFamily.Default }
 val LocalStatusColors = staticCompositionLocalOf { StatusColors.light }
 
 private val LightScheme = lightColorScheme(
@@ -141,12 +140,14 @@ private val DarkScheme = darkColorScheme(
     surfaceContainerLowest = Color(0xFF0C0E13),
 )
 
+// The Material 3 shape scale. Components reach for the wider CornerRadius and
+// ExpressiveShapes sets directly when a role calls for 20/32/48 dp or a morph.
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    extraSmall = CornerRadius.extraSmall,
+    small = CornerRadius.small,
+    medium = CornerRadius.medium,
+    large = CornerRadius.large,
+    extraLarge = CornerRadius.extraLarge,
 )
 
 @Composable
@@ -185,9 +186,11 @@ fun RemoteHubTheme(
     darkTheme: Boolean,
     content: @Composable () -> Unit,
 ) {
-    val symbolFont = FontFamily(Font(Res.font.material_symbols))
+    val symbolFont = FontFamily(Font(Res.font.material_symbols_outlined))
+    val symbolFontFilled = FontFamily(Font(Res.font.material_symbols_filled))
     CompositionLocalProvider(
         LocalSymbolFont provides symbolFont,
+        LocalSymbolFontFilled provides symbolFontFilled,
         LocalStatusColors provides if (darkTheme) StatusColors.dark else StatusColors.light,
     ) {
         MaterialTheme(

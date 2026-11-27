@@ -9,6 +9,7 @@ import app.remotehub.net.TailscaleNode
 import app.remotehub.ui.RemoteMetrics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -34,6 +35,13 @@ class RdpSession(
     private var lastBytes: Long = 0
     private var fingerprint: String = ""
 
+    /**
+     * FreeRDP connects on its own thread, so nativeConnect returning true only means
+     * the thread started. This is completed by the engine's own state callback, which
+     * is what lets the UI say "connected" only when a desktop actually exists.
+     */
+    private val ready = CompletableDeferred<Unit>()
+
     var trackpadMode: Boolean = false
     var onUpdate: (RemoteMetrics) -> Unit = {}
     var onError: (String) -> Unit = {}
@@ -43,13 +51,23 @@ class RdpSession(
         override fun onState(state: Int, message: String) {
             Diagnostics.info("rdp", "engine state=$state ${message}".trim())
             when (state) {
-                NativeRdp.STATE_FAILED -> onError(message)
-                NativeRdp.STATE_CERT_CHANGED -> onError("host certificate changed: $message")
+                NativeRdp.STATE_FAILED -> {
+                    val failure = IllegalStateException(message)
+                    if (!ready.isCompleted) ready.completeExceptionally(failure) else onError(message)
+                }
+                NativeRdp.STATE_CERT_CHANGED -> {
+                    val text = "host certificate changed: $message"
+                    if (!ready.isCompleted) ready.completeExceptionally(IllegalStateException(text)) else onError(text)
+                }
+                NativeRdp.STATE_DISCONNECTED -> {
+                    if (!ready.isCompleted) ready.completeExceptionally(IllegalStateException("the session closed before a desktop arrived"))
+                }
                 NativeRdp.STATE_CONNECTED -> {
                     fingerprint = runCatching { NativeRdp.fingerprint(handle) }.getOrDefault("")
                     if (fingerprint.isNotBlank()) {
                         store.put("$FINGERPRINT_PREFIX${server.id}", fingerprint)
                     }
+                    if (!ready.isCompleted) ready.complete(Unit)
                 }
                 else -> Unit
             }
@@ -96,7 +114,10 @@ class RdpSession(
             colorDepth = 24,
             nla = true,
             graphicsPipeline = true,
-            h264 = true,
+            // RemoteFX and planar are decoded inside libfreerdp. H.264 additionally
+            // needs the bundled decoder to load, so it is opt-in rather than the
+            // only path to a picture.
+            h264 = false,
             clipboard = true,
             audio = false,
             pinnedFingerprint = pinned,
@@ -109,6 +130,14 @@ class RdpSession(
 
         startPump()
         startStats(connection.address, connection.port)
+        // Wait for the engine, not for the thread. NLA plus a cold DERP path can take
+        // a while, so the budget is generous but bounded.
+        try {
+            kotlinx.coroutines.withTimeout(75_000) { ready.await() }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            error("the desktop did not appear within 75s (the session may still be logging on)")
+        }
+        Diagnostics.info("rdp", "desktop is live at ${NativeRdp.width(handle)}x${NativeRdp.height(handle)}")
     }
 
     /**
@@ -150,6 +179,14 @@ class RdpSession(
         pumpJob = scope.launch {
             var failures = 0
             while (isActive) {
+                // The host owns the resolution. When Windows reactivates the session
+                // with a different size, the bitmap must be rebuilt or every frame is
+                // rendered into a buffer of the wrong shape.
+                val hostWidth = NativeRdp.width(handle)
+                val hostHeight = NativeRdp.height(handle)
+                if (hostWidth > 0 && hostHeight > 0) {
+                    withContext(Dispatchers.Main) { ensureBitmap(hostWidth, hostHeight) }
+                }
                 val target = bitmap
                 if (target != null && handle != 0L) {
                     // A render failure must not spin silently or take the app down.

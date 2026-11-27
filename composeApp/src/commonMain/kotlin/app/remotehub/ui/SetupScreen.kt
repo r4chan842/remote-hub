@@ -1,5 +1,6 @@
 package app.remotehub.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +27,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.Modifier
@@ -34,6 +36,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.remotehub.app.AppState
 import app.remotehub.app.SetupItem
+import app.remotehub.design.ExpressiveShapes
 import app.remotehub.design.InfoRow
 import app.remotehub.design.NoticeBanner
 import app.remotehub.design.Panel
@@ -47,6 +50,9 @@ import app.remotehub.design.WarningBanner
 import app.remotehub.domain.NetworkState
 import app.remotehub.domain.ServerState
 import app.remotehub.i18n.LocalStrings
+import app.remotehub.resources.Res
+import app.remotehub.resources.brand_mark
+import org.jetbrains.compose.resources.painterResource
 
 /** GitHub's token page with the two required scopes already ticked. */
 const val CREATE_TOKEN_URL =
@@ -132,7 +138,25 @@ fun SetupContent(
             }
         }
 
-        Text(s.setupTitle, style = MaterialTheme.typography.headlineSmall, color = scheme.onSurface)
+        // Brand header: the app's own mark, one line of intent, no decoration.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // The mark is stored as a white alpha mask, so it is tinted with the
+            // theme's ink: visible on a light surface and on a dark one alike.
+            Image(
+                painter = painterResource(Res.drawable.brand_mark),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(scheme.onSurface),
+                modifier = Modifier.size(44.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(s.setupTitle, style = MaterialTheme.typography.titleLarge, color = scheme.onSurface)
+                Text(s.brandTagline, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            }
+        }
         Text(s.setupSubtitle, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
 
         // ---- item 1: GitHub ----
@@ -144,6 +168,7 @@ fun SetupContent(
                 title = s.setupGithubTitle,
                 statusText = if (state.githubReady) "@${state.account?.login}" else s.setupGithubHint,
                 ok = state.githubReady,
+                shape = ExpressiveShapes.clover4,
             )
             if (state.githubReady) {
                 OutlinedButton(
@@ -210,6 +235,7 @@ fun SetupContent(
                     else -> s.setupNetworkHint
                 },
                 ok = state.networkReady,
+                shape = ExpressiveShapes.gem,
             )
             if (state.networkReady) {
                 InfoRow(s.address, state.tailnet.nodeAddress, monospace = true)

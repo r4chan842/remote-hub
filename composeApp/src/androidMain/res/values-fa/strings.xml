@@ -20,4 +20,6 @@
     <string name="clipboard_sent">کلیپ‌بورد به سرور فرستاده شد.</string>
     <string name="clipboard_pending">کانال کلیپ‌بورد هنوز آماده نیست.</string>
     <string name="backup_stored">بکاپ رمزنگاری‌شده در ریپوی تو ذخیره شد.</string>
+    <string name="vpn_notification_title">VPN دستگاه</string>
+    <string name="vpn_notification_stop">توقف VPN</string>
 </resources>

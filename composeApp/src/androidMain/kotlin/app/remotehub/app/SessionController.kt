@@ -34,6 +34,7 @@ import app.remotehub.github.GitHubException
 import app.remotehub.github.StoredServer
 import app.remotehub.i18n.stringsFor
 import app.remotehub.net.TailscaleNode
+import app.remotehub.net.TailscaleVpnService
 import app.remotehub.rdp.RdpSession
 import app.remotehub.server.ProvisionEvent
 import app.remotehub.server.ProvisionRequest
@@ -61,7 +62,7 @@ class SessionController(
     private val store: SecureStore,
     private val secretBox: SecretBox,
     private val scope: CoroutineScope,
-) {
+) : TailscaleVpnService.Host {
     var onState: (AppState) -> Unit = {}
     var onEffect: (SideEffect) -> Unit = {}
 
@@ -70,6 +71,8 @@ class SessionController(
     private var github: GitHubClient? = null
     private val node = TailscaleNode(context)
     private val rdpSessions = mutableMapOf<String, RdpSession>()
+    private var vpnTargetAddress: String = ""
+    private var vpnRebuildAttempts = 0
     private val metricsCache = mutableMapOf<String, RemoteMetrics>()
     private var provisionJob: Job? = null
     private var watchJob: Job? = null
@@ -78,6 +81,15 @@ class SessionController(
     private var pendingLoginUrl: String? = null
 
     private fun publish(next: AppState) {
+        // The last position is written whenever it changes, so closing the app in the
+        // middle of something and reopening lands on the same session.
+        if (next.activeServerId != state.activeServerId) {
+            val id = next.activeServerId
+            if (id.isNullOrBlank()) store.remove(StoreKeys.LAST_SERVER) else store.put(StoreKeys.LAST_SERVER, id)
+        }
+        if (next.screen != state.screen && next.screen != AppScreen.Remote) {
+            store.put(StoreKeys.LAST_SCREEN, next.screen.name)
+        }
         state = next
         onState(next)
     }
@@ -148,6 +160,10 @@ class SessionController(
         publish(state.copy(logs = currentLogs()))
     }
 
+    fun copyValue(label: String, value: String) {
+        if (value.isNotBlank()) onEffect(SideEffect.Copy(label, value))
+    }
+
     fun copyLogs() {
         val text = Diagnostics.exportText(300)
         Diagnostics.info("app", "log copied to clipboard")
@@ -190,6 +206,7 @@ class SessionController(
             repositoryName = store.get(REPO_KEY) ?: "remote-hub-sessions",
             warningMinutes = store.get(StoreKeys.WARNING_MINUTES)?.toIntOrNull() ?: 15,
             expiryAlertEnabled = store.get(ALERT_KEY) != "false",
+            trackpadMode = store.get(StoreKeys.TRACKPAD) == "true",
         )
         if (token != null && login != null) {
             github = GitHubClient(token)
@@ -217,7 +234,23 @@ class SessionController(
                 errorDetail = notice.detail.ifBlank { notice.message },
             )
         }
-        Diagnostics.info("app", "session restored: servers=${next.servers.size} github=${next.account != null}")
+        // Reopen on the session the user was looking at, if it still exists.
+        val lastId = store.get(StoreKeys.LAST_SERVER)
+        val lastScreen = store.get(StoreKeys.LAST_SCREEN)
+        if (lastId != null && next.servers.any { it.id == lastId }) {
+            val restored = when (lastScreen) {
+                AppScreen.Detail.name, AppScreen.Remote.name -> AppScreen.Detail
+                AppScreen.Progress.name -> AppScreen.Detail
+                else -> AppScreen.Setup
+            }
+            next = next.copy(activeServerId = lastId, screen = restored)
+        } else if (lastScreen == AppScreen.Servers.name && next.servers.isNotEmpty()) {
+            next = next.copy(screen = AppScreen.Servers)
+        }
+        Diagnostics.info(
+            "app",
+            "session restored: servers=${next.servers.size} github=${next.account != null} screen=${next.screen}",
+        )
         // Prove the crypto engine works now, not halfway through creating a server.
         scope.launch {
             val problem = withContext(Dispatchers.IO) { CryptoCheck.run() }
@@ -227,6 +260,19 @@ class SessionController(
         if (token != null) refreshAccount()
         val key = store.get(StoreKeys.TS_AUTH_KEY)
         if (!key.isNullOrBlank()) connectNetwork(key, silent = true)
+        // The device-wide tunnel is a preference, not a one-shot action: bring it back
+        // after a restart so other RDP clients keep working without touching the app.
+        if (store.get(StoreKeys.DEVICE_VPN) == "true" && !key.isNullOrBlank()) {
+            scope.launch {
+                repeat(40) {
+                    if (node.running) {
+                        if (TailscaleVpnService.consentIntent(context) == null) startDeviceVpn()
+                        return@launch
+                    }
+                    delay(1000)
+                }
+            }
+        }
         next.servers.filter { it.state == ServerState.Provisioning }.forEach { watchRun(it.id) }
     }
 
@@ -359,7 +405,16 @@ class SessionController(
         scope.launch {
             publish(state.copy(busy = !silent, tailnet = state.tailnet.copy(state = NetworkState.Connecting)))
             store.put(StoreKeys.TS_AUTH_KEY, key)
-            runCatching { node.start(hostname = "remotehub-phone", authKey = key, ephemeral = true) }
+            // A running node with the same key is left alone: restarting it would
+            // tear down every live desktop and change the phone's tailnet address.
+            val existing = node.status()
+            if (existing.running && !state.deviceVpn) {
+                applyNodeStatus(existing)
+                node.startPolling { applyNodeStatus(it) }
+                publish(state.copy(busy = !silent, error = null))
+                return@launch
+            }
+            runCatching { node.start(hostname = PHONE_HOSTNAME, authKey = key, ephemeral = false) }
                 .onSuccess { status ->
                     applyNodeStatus(status)
                     if (status.running) {
@@ -410,13 +465,181 @@ class SessionController(
         )
     }
 
+    // ------------------------------------------------------------ device VPN
+
+    /**
+     * Moves the tailnet from "only this app" to "the whole phone".
+     *
+     * The interface has to carry this node's real tailnet address: a peer drops
+     * packets whose source is not an address it knows for us. So the address is read
+     * from the running node first, the VpnService is established with it, and only
+     * then is the node restarted with the descriptor attached. The node is kept
+     * non-ephemeral in this mode so control hands back the same address, and the
+     * result is verified afterwards instead of assumed.
+     */
+    fun toggleDeviceVpn() {
+        if (state.deviceVpn) {
+            disableDeviceVpn()
+            return
+        }
+        if (!node.running) {
+            publish(state.copy(error = context.getString(R.string.err_network_first)))
+            return
+        }
+        val consent = TailscaleVpnService.consentIntent(context)
+        if (consent != null) {
+            Diagnostics.info("vpn", "asking the system for VPN consent")
+            onEffect(SideEffect.RequestVpnConsent)
+            return
+        }
+        startDeviceVpn()
+    }
+
+    fun onVpnConsent(granted: Boolean) {
+        if (!granted) {
+            Diagnostics.warn("vpn", "VPN consent was declined")
+            publish(state.copy(vpnBusy = false, error = stringsFor(state.localeTag).vpnDenied))
+            return
+        }
+        startDeviceVpn()
+    }
+
+    private fun startDeviceVpn() {
+        val status = node.status()
+        if (!status.running || status.ipv4.isBlank()) {
+            publish(state.copy(error = context.getString(R.string.err_network_first)))
+            return
+        }
+        // Restarting the node drops every live desktop; do it deliberately.
+        rdpSessions.values.forEach { it.close() }
+        rdpSessions.clear()
+        publish(state.copy(vpnBusy = true, error = null))
+        TailscaleVpnService.host = this
+        vpnTargetAddress = status.ipv4
+        val intent = android.content.Intent(context, TailscaleVpnService::class.java)
+            .putExtra(TailscaleVpnService.EXTRA_IPV4, status.ipv4)
+            .putExtra(TailscaleVpnService.EXTRA_IPV6, status.ipv6)
+            .putExtra(TailscaleVpnService.EXTRA_DOMAIN, status.dnsSuffix.ifBlank { status.tailnet })
+            .putExtra(TailscaleVpnService.EXTRA_LABEL, status.hostname)
+        runCatching { androidx.core.content.ContextCompat.startForegroundService(context, intent) }
+            .onFailure {
+                Diagnostics.error("vpn", "the VPN service could not start", it)
+                publish(state.copy(vpnBusy = false, error = it.message ?: "VPN service failed"))
+            }
+    }
+
+    override fun onTunReady(fd: Int, interfaceName: String) {
+        scope.launch {
+            val key = store.get(StoreKeys.TS_AUTH_KEY).orEmpty()
+            if (key.isBlank()) {
+                publish(state.copy(vpnBusy = false, deviceVpn = false))
+                return@launch
+            }
+            Diagnostics.info("vpn", "restarting the node on the tunnel interface")
+            // Non-ephemeral: the node keeps its identity, so the address on the
+            // interface stays valid across the restart.
+            val status = node.start(hostname = PHONE_HOSTNAME, authKey = key, ephemeral = false, tunFd = fd)
+            Diagnostics.pullNative()
+            applyNodeStatus(status)
+            if (!status.running) {
+                stopVpnService()
+                publish(state.copy(vpnBusy = false, deviceVpn = false, error = status.error.ifBlank { "tunnel failed" }))
+                return@launch
+            }
+            if (status.ipv4 != vpnTargetAddress) {
+                // Control gave a different address. Rebuild the interface once with
+                // the address the node actually owns; the node key is now persisted,
+                // so the second attempt matches.
+                Diagnostics.warn("vpn", "address changed ${vpnTargetAddress} -> ${status.ipv4}; rebuilding the interface")
+                vpnRebuildAttempts += 1
+                if (vpnRebuildAttempts <= 1) {
+                    stopVpnService()
+                    startDeviceVpn()
+                    return@launch
+                }
+                // Two attempts and the address still moves: do not claim a tunnel
+                // that cannot carry traffic. Fall back to the in-app tunnel.
+                vpnRebuildAttempts = 0
+                onTunFailed("the tailnet address kept changing while the interface was built")
+                return@launch
+            }
+            vpnRebuildAttempts = 0
+            store.put(StoreKeys.DEVICE_VPN, "true")
+            node.startPolling { applyNodeStatus(it) }
+            publish(
+                state.copy(
+                    deviceVpn = true,
+                    vpnBusy = false,
+                    vpnInterface = status.tunName.ifBlank { interfaceName },
+                    error = null,
+                ),
+            )
+            Diagnostics.info("vpn", "device-wide tailnet is up on ${status.ipv4}")
+        }
+    }
+
+    override fun onTunFailed(reason: String) {
+        stopVpnService()
+        store.remove(StoreKeys.DEVICE_VPN)
+        publish(state.copy(deviceVpn = false, vpnBusy = false, vpnInterface = ""))
+        fail("vpn", reason)
+        // Fall back to the in-app tunnel so the user is never left offline.
+        val key = store.get(StoreKeys.TS_AUTH_KEY).orEmpty()
+        if (key.isNotBlank()) scope.launch { node.start(PHONE_HOSTNAME, key, ephemeral = false) }
+    }
+
+    override fun onTunRevoked() {
+        Diagnostics.warn("vpn", "VPN revoked by the system; falling back to the in-app tunnel")
+        store.remove(StoreKeys.DEVICE_VPN)
+        rdpSessions.values.forEach { it.close() }
+        rdpSessions.clear()
+        publish(state.copy(deviceVpn = false, vpnBusy = false, vpnInterface = ""))
+        val key = store.get(StoreKeys.TS_AUTH_KEY).orEmpty()
+        if (key.isNotBlank()) {
+            scope.launch {
+                applyNodeStatus(node.start(PHONE_HOSTNAME, key, ephemeral = false))
+            }
+        }
+    }
+
+    fun disableDeviceVpn() {
+        publish(state.copy(vpnBusy = true))
+        store.remove(StoreKeys.DEVICE_VPN)
+        rdpSessions.values.forEach { it.close() }
+        rdpSessions.clear()
+        stopVpnService()
+        val key = store.get(StoreKeys.TS_AUTH_KEY).orEmpty()
+        scope.launch {
+            if (key.isNotBlank()) applyNodeStatus(node.start(PHONE_HOSTNAME, key, ephemeral = false))
+            publish(state.copy(deviceVpn = false, vpnBusy = false, vpnInterface = "", error = null))
+        }
+    }
+
+    private fun stopVpnService() {
+        runCatching {
+            context.startService(
+                android.content.Intent(context, TailscaleVpnService::class.java)
+                    .setAction(TailscaleVpnService.ACTION_STOP),
+            )
+        }
+    }
+
     fun disconnectNetwork() {
         scope.launch {
             rdpSessions.values.forEach { it.close() }
             rdpSessions.clear()
+            if (state.deviceVpn) stopVpnService()
+            store.remove(StoreKeys.DEVICE_VPN)
             node.stop()
-            store.remove(StoreKeys.TS_AUTH_KEY)
-            publish(state.copy(tailnet = state.tailnet.copy(state = NetworkState.Offline, nodeAddress = "")))
+            // The auth key is a credential, not session state: keep it so the next
+            // launch signs back in on its own. Settings has the explicit "forget".
+            publish(
+                state.copy(
+                    deviceVpn = false,
+                    vpnInterface = "",
+                    tailnet = state.tailnet.copy(state = NetworkState.Offline, nodeAddress = ""),
+                ),
+            )
         }
     }
 
@@ -557,6 +780,62 @@ class SessionController(
 
     fun retryProvision() = provision()
 
+    /**
+     * Restarts the server the user already has, without creating a second one.
+     *
+     * The existing run is re-run through the GitHub API, so the run id, run number,
+     * session id, tailnet hostname and repository secrets are reused. A cancelled or
+     * finished session comes back with the same address book entry and the same
+     * password; only the clock starts again.
+     */
+    fun restartSession(serverId: String) {
+        val session = state.servers.firstOrNull { it.id == serverId } ?: return
+        val client = github
+        if (client == null) {
+            publish(state.copy(error = context.getString(R.string.err_token_empty)))
+            return
+        }
+        val owner = session.repositoryFullName.substringBefore('/', "")
+        val repo = session.repositoryFullName.substringAfter('/', "")
+        if (session.runId <= 0L || owner.isBlank() || repo.isBlank()) {
+            // Nothing to re-run yet: fall back to a fresh dispatch for this form.
+            publish(state.copy(form = CreateForm(session.name, session.durationMinutes)))
+            provision()
+            return
+        }
+        rdpSessions.remove(serverId)?.close()
+        scope.launch {
+            publish(state.copy(busy = true, error = null, screen = AppScreen.Progress, activeServerId = serverId))
+            Diagnostics.info("session", "re-running workflow run ${session.runId} for ${session.id}")
+            runCatching { client.rerun(owner, repo, session.runId) }
+                .onFailure { failure ->
+                    Diagnostics.error("session", "rerun failed", failure)
+                    publish(state.copy(busy = false))
+                    fail("github", failure.message ?: "rerun failed", failure)
+                    return@launch
+                }
+            val now = Clock.System.now().toEpochMilliseconds()
+            updateServer(serverId) {
+                it.copy(
+                    state = ServerState.Provisioning,
+                    startedAtEpochMs = now,
+                    steps = emptyList(),
+                    connection = it.connection?.copy(address = "") ?: it.connection,
+                )
+            }
+            persistServers()
+            publish(state.copy(busy = false, steps = emptyList(), progressLog = emptyList()))
+            // GitHub needs a moment to open the new attempt; until then the run still
+            // reads "completed" and the watcher would call the session finished.
+            for (attempt in 1..20) {
+                delay(2000)
+                val fresh = runCatching { client.run(owner, repo, session.runId) }.getOrNull()
+                if (fresh != null && fresh.status != "completed") break
+            }
+            watchRun(serverId)
+        }
+    }
+
     // ---------------------------------------------------------------- follow the run
 
     private fun watchRun(serverId: String) {
@@ -689,10 +968,21 @@ class SessionController(
 
     // ---------------------------------------------------------------- remote desktop
 
+    fun tailnetDevices(): List<app.remotehub.ui.TailnetDevice> =
+        node.peers().map { app.remotehub.ui.TailnetDevice(it.hostname, it.ipv4, it.online) }
+
     fun remoteMetrics(serverId: String): RemoteMetrics =
         metricsCache[serverId] ?: RemoteMetrics(0, 0, 0, "—", state.trackpadMode, true)
 
     fun rdpSession(serverId: String): RdpSession? = rdpSessions[serverId]
+
+    /** Width / height of the live host desktop, for a pixel-accurate viewport. */
+    fun remoteAspectRatio(serverId: String): Float {
+        val label = remoteMetrics(serverId).resolutionLabel
+        val w = label.substringBefore('x').toIntOrNull() ?: 0
+        val h = label.substringAfter('x', "").toIntOrNull() ?: 0
+        return if (w > 0 && h > 0) w.toFloat() / h.toFloat() else 16f / 9f
+    }
 
     fun connectRemote(serverId: String) {
         val session = state.servers.firstOrNull { it.id == serverId } ?: return
@@ -717,16 +1007,24 @@ class SessionController(
             return
         }
         scope.launch {
-            publish(state.copy(screen = AppScreen.Remote, activeServerId = serverId, busy = true, error = null))
+            publish(
+                state.copy(
+                    screen = AppScreen.Remote,
+                    activeServerId = serverId,
+                    busy = true,
+                    remoteConnecting = true,
+                    error = null,
+                ),
+            )
             rdpSessions[serverId]?.let {
-                publish(state.copy(busy = false))
+                publish(state.copy(busy = false, remoteConnecting = false))
                 return@launch
             }
             // A quick reachability probe turns "RDP connect call failed" into a
             // sentence the user can act on, and it is logged either way.
             val reachable = node.probe(connection.address, connection.port, 8000)
             if (!reachable) {
-                publish(state.copy(busy = false))
+                publish(state.copy(busy = false, remoteConnecting = false))
                 fail("rdp", "connection refused: ${connection.address}:${connection.port} is not reachable over the tunnel")
                 return@launch
             }
@@ -743,14 +1041,25 @@ class SessionController(
                     Diagnostics.info("rdp", "connected to ${session.connection?.address}:${session.connection?.port}")
                     updateServer(serverId) { it.copy(state = ServerState.Connected) }
                     startSessionService(session.name)
-                    publish(state.copy(busy = false))
+                    publish(state.copy(busy = false, remoteConnecting = false))
                 }
                 .onFailure { error ->
                     rdpSessions.remove(serverId)
                     rdp.close()
+                    publish(state.copy(remoteConnecting = false))
                     fail("rdp", error.message ?: context.getString(R.string.err_rdp), error)
                 }
         }
+    }
+
+    /**
+     * Fullscreen is a view mode. It used to be wired to disconnectRemote, so tapping
+     * it aborted the connection and FreeRDP reported CONNECT_CANCELLED (0x0002000B).
+     */
+    fun toggleRemoteFullscreen() {
+        val next = !state.remoteFullscreen
+        publish(state.copy(remoteFullscreen = next))
+        onEffect(SideEffect.Immersive(next))
     }
 
     fun disconnectRemote(serverId: String) {
@@ -758,7 +1067,8 @@ class SessionController(
         metricsCache.remove(serverId)
         updateServer(serverId) { if (it.state == ServerState.Connected) it.copy(state = ServerState.Ready) else it }
         stopSessionService()
-        publish(state.copy(screen = AppScreen.Detail))
+        if (state.remoteFullscreen) onEffect(SideEffect.Immersive(false))
+        publish(state.copy(screen = AppScreen.Detail, remoteFullscreen = false, remoteConnecting = false))
     }
 
     fun showKeyboard() {
@@ -783,6 +1093,7 @@ class SessionController(
 
     fun toggleInputMode() {
         val next = !state.trackpadMode
+        store.put(StoreKeys.TRACKPAD, if (next) "true" else "false")
         publish(state.copy(trackpadMode = next))
         rdpSessions.values.forEach { it.trackpadMode = next }
     }
@@ -816,16 +1127,8 @@ class SessionController(
 
     /** Runs the same workflow again. A fresh machine, a fresh address, a fresh password. */
     fun rerunServer(serverId: String) {
-        val session = state.servers.firstOrNull { it.id == serverId } ?: return
-        rdpSessions.remove(serverId)?.close()
         metricsCache.remove(serverId)
-        publish(
-            state.copy(
-                form = state.form.copy(name = session.name, durationMinutes = session.durationMinutes),
-                activeServerId = serverId,
-            ),
-        )
-        provision()
+        restartSession(serverId)
     }
 
     // ---------------------------------------------------------------- backup
@@ -939,6 +1242,10 @@ class SessionController(
 
     fun goSettings() = publish(state.copy(screen = AppScreen.Settings))
 
+    fun goServers() = publish(state.copy(screen = AppScreen.Servers, error = null, activeServerId = null))
+
+    fun goNetwork() = publish(state.copy(screen = AppScreen.Network, error = null))
+
     fun openGuide(id: String) = publish(state.copy(screen = AppScreen.Guide, guideId = id))
 
     fun closeGuide() = publish(state.copy(screen = AppScreen.Settings, guideId = null))
@@ -972,6 +1279,7 @@ class SessionController(
     }
 
     companion object {
+        const val PHONE_HOSTNAME = "remotehub-phone"
         const val REPO_KEY = "sessions.repo"
         const val ALERT_KEY = "settings.expiryalert"
         const val CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"

@@ -42,6 +42,8 @@ data class NodeStatus(
     val version: String = "",
     val userspace: Boolean = true,
     val forwarders: List<String> = emptyList(),
+    val tunName: String = "",
+    val dnsSuffix: String = "",
 )
 
 @Serializable
@@ -81,7 +83,8 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
     suspend fun start(
         hostname: String,
         authKey: String,
-        ephemeral: Boolean = true,
+        ephemeral: Boolean = false,
+        tunFd: Int? = null,
     ): NodeStatus = withContext(Dispatchers.IO) {
         stop()
         Diagnostics.info("network", "starting tailscale node hostname=$hostname ephemeral=$ephemeral")
@@ -90,6 +93,19 @@ class TailscaleNode(private val context: Context = AndroidEnv.appContext) {
                 Diagnostics.error("network", "native node could not be created", failure)
                 return@withContext NodeStatus(error = failure.message ?: "native bridge unavailable", stage = "create")
             }
+        // The descriptor must be adopted before Start: tsnet reads Server.Tun once,
+        // while it builds the engine. A real TUN makes the tailnet device-wide.
+        if (tunFd != null) {
+            val adopted = runCatching { created.useTun(tunFd.toLong()) }
+            if (adopted.isFailure) {
+                Diagnostics.error("vpn", "the tunnel interface could not be adopted", adopted.exceptionOrNull())
+                return@withContext NodeStatus(
+                    error = adopted.exceptionOrNull()?.message ?: "tun adoption failed",
+                    stage = "tun",
+                )
+            }
+            Diagnostics.info("vpn", "tunnel interface handed to the node")
+        }
         synchronized(gate) { node = created }
         runCatching { created.startAsync() }
             .onFailure { Diagnostics.error("network", "start call failed", it) }

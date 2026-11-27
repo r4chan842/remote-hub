@@ -13,6 +13,7 @@
 package tsbridge
 
 import (
+	"github.com/tailscale/wireguard-go/tun"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,8 @@ type Node struct {
 	authURL  string
 	logs     []string
 	forwards map[string]*forwarder
+	tunDev   tun.Device
+	tunName  string
 }
 
 type forwarder struct {
@@ -60,6 +63,7 @@ type Status struct {
 	Running    bool     `json:"running"`
 	Hostname   string   `json:"hostname"`
 	Tailnet    string   `json:"tailnet"`
+	DNSSuffix  string   `json:"dnsSuffix"`
 	IPv4       string   `json:"ipv4"`
 	IPv6       string   `json:"ipv6"`
 	AuthURL    string   `json:"authUrl"`
@@ -75,6 +79,7 @@ type Status struct {
 	Version    string   `json:"version"`
 	Userspace  bool     `json:"userspace"`
 	Forwarders []string `json:"forwarders"`
+	TunName    string   `json:"tunName"`
 }
 
 type Peer struct {
@@ -187,6 +192,16 @@ func (n *Node) Start() (err error) {
 			n.appendLog(fmt.Sprintf(format, args...))
 		},
 	}
+	// A real TUN turns this node into a device-wide tunnel. tsnet then leaves
+	// packet processing to the interface instead of netstack, which is what makes
+	// the tailnet reachable from other apps on the phone.
+	n.mu.Lock()
+	tunDevice := n.tunDev
+	n.mu.Unlock()
+	if tunDevice != nil {
+		srv.Tun = tunDevice
+		diagLog("INFO", "node", "starting with a real TUN (device-wide tailnet)")
+	}
 	n.mu.Lock()
 	n.srv = srv
 	n.started = true
@@ -263,6 +278,7 @@ func (n *Node) StatusJSON() (out string) {
 	st.Error = n.lastErr
 	st.Stage = n.stage
 	st.AuthURL = n.authURL
+	st.TunName = n.tunName
 	st.Logs = append([]string{}, n.logs...)
 	for addr := range n.forwards {
 		st.Forwarders = append(st.Forwarders, addr)
@@ -293,6 +309,7 @@ func (n *Node) StatusJSON() (out string) {
 	st.PeerCount = len(s.Peer)
 	if s.CurrentTailnet != nil {
 		st.Tailnet = s.CurrentTailnet.Name
+		st.DNSSuffix = s.CurrentTailnet.MagicDNSSuffix
 	}
 	if s.Self != nil {
 		st.Hostname = strings.TrimSuffix(s.Self.DNSName, ".")
@@ -448,6 +465,7 @@ func (n *Node) Stop() {
 	if srv != nil {
 		srv.Close()
 	}
+	n.closeTun()
 }
 
 func (n *Node) Wipe() (err error) {

@@ -20,4 +20,6 @@
     <string name="clipboard_sent">أُرسلت الحافظة إلى الخادم.</string>
     <string name="clipboard_pending">قناة الحافظة غير جاهزة بعد.</string>
     <string name="backup_stored">حُفظ نسخة احتياطية مشفرة في مستودعك.</string>
+    <string name="vpn_notification_title">VPN الجهاز</string>
+    <string name="vpn_notification_stop">إيقاف VPN</string>
 </resources>

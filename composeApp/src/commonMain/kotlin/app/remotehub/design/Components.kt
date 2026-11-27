@@ -239,7 +239,14 @@ fun StepRow(title: String, status: StepStatus, detail: String?, elapsed: String?
 }
 
 @Composable
-fun SetupRow(glyph: String, title: String, statusText: String, ok: Boolean, modifier: Modifier = Modifier) {
+fun SetupRow(
+    glyph: String,
+    title: String,
+    statusText: String,
+    ok: Boolean,
+    modifier: Modifier = Modifier,
+    shape: androidx.compose.ui.graphics.Shape = ExpressiveShapes.cookie6,
+) {
     val scheme = MaterialTheme.colorScheme
     val status = LocalStatusColors.current
     Row(
@@ -247,15 +254,14 @@ fun SetupRow(glyph: String, title: String, statusText: String, ok: Boolean, modi
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Surface(
-            color = if (ok) status.successContainer else scheme.surfaceVariant,
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.size(36.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Symbol(glyph, size = 20.dp, tint = if (ok) status.onSuccessContainer else scheme.onSurfaceVariant)
-            }
-        }
+        IconBadge(
+            glyph = glyph,
+            shape = shape,
+            size = 40.dp,
+            container = if (ok) status.successContainer else scheme.surfaceVariant,
+            content = if (ok) status.onSuccessContainer else scheme.onSurfaceVariant,
+            filled = ok,
+        )
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
             Text(
@@ -268,6 +274,7 @@ fun SetupRow(glyph: String, title: String, statusText: String, ok: Boolean, modi
             if (ok) Symbols.checkCircle else Symbols.chevronRight,
             size = 20.dp,
             tint = if (ok) status.success else scheme.outline,
+            filled = ok,
         )
     }
 }
