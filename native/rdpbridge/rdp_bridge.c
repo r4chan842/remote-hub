@@ -400,14 +400,16 @@ static DWORD rh_verify_certificate_ex(freerdp* instance, const char* host, UINT1
 
 	if (pinned && *pinned && fingerprint)
 	{
+		/* Return 2 = accept for this session only. The app keeps the fingerprint in
+		 * its own encrypted store, so FreeRDP never has to write a known_hosts file. */
 		if (strstr(pinned, fingerprint) != NULL)
-			return 1;
+			return 2;
 		LOGW("certificate fingerprint does not match the pinned value");
 		rh_notify_state(rh, RH_STATE_CERT_CHANGED, "fingerprint_mismatch");
 		return 0;
 	}
 	LOGI("trusting certificate on first use: %s", fingerprint ? fingerprint : "");
-	return 1;
+	return 2;
 }
 
 static DWORD rh_verify_changed_certificate_ex(freerdp* instance, const char* host, UINT16 port,
@@ -722,7 +724,14 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeConnect(
 	freerdp_settings_set_bool(settings, FreeRDP_Workarea, FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_GatewayEnabled, FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_ConsoleSession, FALSE);
-	freerdp_settings_set_uint32(settings, FreeRDP_AuthenticationLevel, 0);
+	/* Level 2 keeps certificate verification ON. In FreeRDP 3.33.1
+	 * (libfreerdp/crypto/tls.c, tls_verify_certificate) level 0 short-circuits to
+	 * "success" before any callback runs, which would silently disable both the
+	 * pinned fingerprint check and trust-on-first-use below. */
+	freerdp_settings_set_uint32(settings, FreeRDP_AuthenticationLevel, 2);
+	freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_AutoAcceptCertificate, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_AutoDenyCertificate, FALSE);
 	freerdp_settings_set_uint16(settings, FreeRDP_DesktopOrientation, 0);
 	freerdp_settings_set_uint32(settings, FreeRDP_DesktopScaleFactor, 100);
 	freerdp_settings_set_uint32(settings, FreeRDP_DeviceScaleFactor, 100);

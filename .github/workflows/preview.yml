@@ -1,7 +1,8 @@
 # Test builds for maintainers. Publishes a GitHub *pre-release* with per-ABI APKs signed by
-# the CI debug key, so changes can be installed and tried before the persistent release key
-# (ANDROID_KEYSTORE_* secrets) is configured. Debug-signed APKs cannot update an install
-# signed by another key: uninstall the previous build first. Real releases use release.yml.
+# the fixed preview key stored in PREVIEW_KEYSTORE_* secrets, so each preview installs as an
+# update and the user keeps their data. If those secrets are absent the build falls back to
+# the CI debug key, which cannot update an install signed by another key. Real releases use
+# release.yml with ANDROID_KEYSTORE_*.
 name: Preview build
 
 on:
@@ -55,11 +56,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/fetch-native.sh
 
-      - name: Build per-ABI APKs (debug-signed)
+      # A fixed preview key means a new preview installs as an update: the user keeps
+      # their token, tailnet key and sessions instead of uninstalling every time.
+      # The key lives only in repository secrets and in this runner's temp directory.
+      - name: Prepare the preview signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PREVIEW_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PREVIEW_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PREVIEW_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "PREVIEW_KEYSTORE_BASE64 is not set; falling back to the CI debug key" >&2
+            exit 0
+          fi
+          KS="$RUNNER_TEMP/preview-keystore.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KS"
+          chmod 600 "$KS"
+          {
+            echo "RH_KEYSTORE_FILE=$KS"
+            echo "RH_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "RH_KEY_ALIAS=$KEY_ALIAS"
+            echo "RH_KEY_PASSWORD=$KEYSTORE_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "preview signing key ready"
+
+      - name: Build per-ABI APKs
         run: >
           gradle --no-daemon :composeApp:assembleRelease
           -PappVersionCode=${VERSION_CODE}
           -PappVersionName=${VERSION_NAME}
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/preview-keystore.p12"
 
       - name: Verify APKs (packaging, 16 KB alignment, size)
         run: bash scripts/verify-apk.sh
@@ -77,7 +107,8 @@ jobs:
           {
             echo "**Test build — not a stable release.**"
             echo
-            echo "- Signed with the CI debug key: uninstall RemoteHub 1.0.0 before installing."
+            echo "- Signed with the fixed RemoteHub preview key: installs as an update over any preview from v1.1.0-preview.6 on."
+            echo "- Older previews used a throwaway CI key. Coming from one of those, uninstall once first."
             echo "- Most phones: \`arm64-v8a\`. Older 32-bit phones: \`armeabi-v7a\`. Unsure: \`universal\`."
             echo "- Built from ${GITHUB_SHA}."
             echo

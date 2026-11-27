@@ -74,6 +74,7 @@ class RdpSession(
         Diagnostics.info("rdp", "opening tunnel to ${connection.address}:${connection.port} as ${connection.username}")
         val forward = node.openRdpForward(connection.address, connection.port)
         forwardPort = forward.substringAfterLast(':').toInt()
+        ensureNativePaths()
         handle = NativeRdp.create(listener)
         if (handle == 0L) error("could not allocate an RDP session")
 
@@ -108,6 +109,30 @@ class RdpSession(
 
         startPump()
         startStats(connection.address, connection.port)
+    }
+
+    /**
+     * FreeRDP refuses to create a client context without a HOME directory: it derives
+     * its config path (and the certificate store used during TLS verification) from it.
+     * An Android app process usually has no HOME at all, so point it at app storage
+     * before the engine is created. Values already set by the tunnel are left alone.
+     */
+    private fun ensureNativePaths() {
+        val base = java.io.File(context.filesDir, "rdp")
+        runCatching {
+            if (System.getenv("HOME").isNullOrBlank()) {
+                val home = java.io.File(base, "home").apply { mkdirs() }
+                android.system.Os.setenv("HOME", home.absolutePath, true)
+            }
+            if (System.getenv("XDG_CONFIG_HOME").isNullOrBlank()) {
+                val config = java.io.File(base, "config").apply { mkdirs() }
+                android.system.Os.setenv("XDG_CONFIG_HOME", config.absolutePath, true)
+            }
+            if (System.getenv("TMPDIR").isNullOrBlank()) {
+                val tmp = java.io.File(base, "tmp").apply { mkdirs() }
+                android.system.Os.setenv("TMPDIR", tmp.absolutePath, true)
+            }
+        }.onFailure { Diagnostics.warn("rdp", "could not prepare native directories", it) }
     }
 
     private fun ensureBitmap(width: Int, height: Int) {

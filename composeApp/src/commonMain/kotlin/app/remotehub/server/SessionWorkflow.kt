@@ -27,7 +27,7 @@ object SessionWorkflow {
     /** Pinned so a new upstream release cannot silently change the session behaviour. */
     const val TAILSCALE_MSI = "https://pkgs.tailscale.com/stable/tailscale-setup-1.104.7-amd64.msi"
 
-    /** Verified against the published package; the installer is rejected if it differs. */
+    /** Re-downloaded and hashed: the installer is rejected if it differs. */
     const val TAILSCALE_MSI_SHA256 = "676b5b32fdd1aeaee90d8e8f38e222635b216fbdfbf877bf01cb1d7cda330ec5"
 
     fun render(checkoutSha: String, uploadArtifactSha: String): String = """
@@ -75,7 +75,7 @@ jobs:
           "RH_HOSTNAME=rh-${'$'}env:SESSION_ID" >> ${'$'}env:GITHUB_ENV
           # The clock starts now, so setup time is inside the requested lifetime and the
           # job always finishes before GitHub's six hour ceiling.
-          "RH_DEADLINE=$((Get-Date).AddMinutes(${'}'}minutes).ToUniversalTime().ToString('o'))" >> ${'$'}env:GITHUB_ENV
+          "RH_DEADLINE=$((Get-Date).AddMinutes(${'$'}minutes).ToUniversalTime().ToString('o'))" >> ${'$'}env:GITHUB_ENV
           Write-Host "Session ${'$'}env:SESSION_ID requested for ${'$'}minutes minutes."
 
       - name: 2. Enable Remote Desktop
@@ -143,10 +143,40 @@ jobs:
           Start-Process msiexec -ArgumentList '/i C:\tailscale.msi /quiet /norestart' -Wait
           Remove-Item C:\tailscale.msi -Force -ErrorAction SilentlyContinue
           ${'$'}exe = "C:\Program Files\Tailscale\tailscale.exe"
-          Start-Sleep -Seconds 5
-          # Ephemeral: the node is removed from the tailnet as soon as it goes offline.
-          & ${'$'}exe up --authkey="${'$'}env:TAILSCALE_AUTHKEY" --hostname="${'$'}env:RH_HOSTNAME" --ephemeral --accept-dns=false --ssh=false --timeout=120s
-          if (${'$'}LASTEXITCODE -ne 0) { throw "tailscale up failed" }
+          # The MSI installs the Tailscale service; wait until it actually answers
+          # instead of sleeping a fixed number of seconds.
+          ${'$'}ready = ${'$'}false
+          foreach (${'$'}attempt in 1..30) {
+            & ${'$'}exe status --json 2>${'$'}null | Out-Null
+            if (${'$'}LASTEXITCODE -eq 0) { ${'$'}ready = ${'$'}true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not ${'$'}ready) { throw "the Tailscale service did not start" }
+          # Flags verified against the pinned client (v1.104.7):
+          #   --auth-key   node key (the CLI rewrites the legacy --authkey spelling)
+          #   --unattended Windows-only: keep the tunnel up with nobody logged in,
+          #                which is exactly the runner's situation
+          #   --accept-dns=false, --ssh=false, --timeout
+          # There is no --ephemeral flag on "tailscale up"; ephemerality comes from
+          # the auth key itself, and the cleanup step logs the node out regardless.
+          ${'$'}upArgs = @(
+            "up",
+            "--auth-key=${'$'}env:TAILSCALE_AUTHKEY",
+            "--hostname=${'$'}env:RH_HOSTNAME",
+            "--unattended=true",
+            "--accept-dns=false",
+            "--ssh=false",
+            "--timeout=120s"
+          )
+          ${'$'}joined = ${'$'}false
+          foreach (${'$'}attempt in 1..3) {
+            & ${'$'}exe @upArgs
+            if (${'$'}LASTEXITCODE -eq 0) { ${'$'}joined = ${'$'}true; break }
+            Write-Host "tailscale up attempt ${'$'}attempt failed; retrying"
+            & ${'$'}exe status 2>&1 | Write-Host
+            Start-Sleep -Seconds 10
+          }
+          if (-not ${'$'}joined) { throw "tailscale up failed" }
           ${'$'}ip = ""
           foreach (${'$'}attempt in 1..20) {
             ${'$'}ip = (& ${'$'}exe ip -4 2>${'$'}null | Select-Object -First 1)
@@ -197,7 +227,10 @@ jobs:
           ${'$'}deadline = [datetime]::Parse(${'$'}env:RH_DEADLINE).ToUniversalTime()
           Write-Host "Session runs until ${'$'}(${'$'}deadline.ToUniversalTime().ToString('u')) (${'$'}total minutes)."
           ${'$'}minute = 0
-          while ((Get-Date).ToUniversalTime() -lt ${'$'}deadline) {
+          # Stop 90 seconds early so the logout step still fits inside GitHub's
+          # six hour job ceiling instead of being cut off by the job timeout.
+          ${'$'}loopEnd = ${'$'}deadline.AddSeconds(-90)
+          while ((Get-Date).ToUniversalTime() -lt ${'$'}loopEnd) {
             Start-Sleep -Seconds 60
             ${'$'}minute++
             ${'$'}left = [int]([math]::Ceiling((${'$'}deadline - (Get-Date).ToUniversalTime()).TotalMinutes))

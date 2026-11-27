@@ -1,17 +1,18 @@
 package app.remotehub.data
 
 import app.remotehub.diag.Diagnostics
+import com.goterl.lazysodium.interfaces.Box
 import java.util.Base64
 
 /**
- * Proves the secret box actually works on this device before a server is created.
+ * Proves the whole secret path works on this device before a server is created.
  *
- * GitHub repository secrets must be sealed with libsodium's crypto_box_seal, which
- * lazysodium reaches through JNA. Both native libraries have to be inside the APK
- * for the right ABI: when JNA's dispatch library is missing the failure only shows
- * up at the "register secrets" step, after a repository has already been created.
- * This check runs once at startup so the problem is reported on the checklist
- * instead, with the exact reason in the log.
+ * It is a real round trip through the shipped native libraries: libsodium generates
+ * a key pair, the app seals a probe exactly the way a GitHub repository secret is
+ * sealed (base64 of the raw sealed box), and the probe is opened again with the
+ * recipient's private key. A wrong encoding, a missing JNA dispatch library or a
+ * broken libsodium all fail here, on the checklist, instead of halfway through
+ * creating a repository.
  */
 object CryptoCheck {
     private const val PROBE = "remotehub-crypto-check"
@@ -25,20 +26,32 @@ object CryptoCheck {
         private set
 
     fun run(): String? {
-        if (checked) return failure
+        // A pass is cached for the process; a failure is retried on the next attempt.
+        if (checked && failure == null) return null
         val problem = try {
-            val box = createSecretBox()
-            // A throwaway recipient key: this only exercises the code path.
-            val publicKey = Base64.getEncoder().encodeToString(randomBytes(32))
-            val sealed = box.seal(PROBE, publicKey)
+            val sodium = Sodium.instance
+            val pair = sodium.cryptoBoxKeypair()
+            val publicBase64 = Base64.getEncoder().encodeToString(pair.publicKey.asBytes)
+            val sealed = createSecretBox().seal(PROBE, publicBase64)
+
             val raw = Base64.getDecoder().decode(sealed)
-            // crypto_box_seal prepends a 32-byte ephemeral public key and a 16-byte MAC.
-            val expected = 48 + PROBE.toByteArray().size
+            val expected = Box.SEALBYTES + PROBE.toByteArray(Charsets.UTF_8).size
             if (raw.size != expected) {
-                "sealed box returned ${raw.size} bytes, expected $expected"
+                "sealed box is ${raw.size} bytes, expected $expected (GitHub needs base64 of the raw box)"
             } else {
-                Diagnostics.info("crypto", "secret box self-test passed (sealed $expected bytes)")
-                null
+                val opened = ByteArray(raw.size - Box.SEALBYTES)
+                val ok = sodium.cryptoBoxSealOpen(
+                    opened, raw, raw.size.toLong(),
+                    pair.publicKey.asBytes, pair.secretKey.asBytes,
+                )
+                if (!ok) {
+                    "crypto_box_seal_open rejected the sealed box"
+                } else if (opened.decodeToString() != PROBE) {
+                    "sealed box round trip returned different text"
+                } else {
+                    Diagnostics.info("crypto", "secret box round trip passed ($expected bytes, base64 ${sealed.length} chars)")
+                    null
+                }
             }
         } catch (error: Throwable) {
             // UnsatisfiedLinkError is an Error, not an Exception: catch Throwable.

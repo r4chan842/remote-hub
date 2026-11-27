@@ -618,8 +618,18 @@ class SessionController(
         val session = state.servers.firstOrNull { it.id == serverId } ?: return
         if (!node.running) return
         val hostname = "rh-${session.id}"
-        val peer = withContext(Dispatchers.IO) { runCatching { node.peers() } }.getOrDefault(emptyList())
-            .firstOrNull { it.hostname.equals(hostname, true) || it.hostname.equals(session.id, true) }
+        val peers = withContext(Dispatchers.IO) { runCatching { node.peers() } }.getOrDefault(emptyList())
+        if (peers.isEmpty()) {
+            Diagnostics.info("network", "no tailnet peers yet while looking for $hostname")
+        }
+        val peer = peers.firstOrNull {
+            it.hostname.equals(hostname, true) ||
+                it.hostname.equals(session.id, true) ||
+                it.dnsName.substringBefore('.').equals(hostname, true)
+        }
+        if (peer == null && peers.isNotEmpty()) {
+            Diagnostics.info("network", "waiting for $hostname; peers: " + peers.joinToString { it.hostname })
+        }
         if (peer != null && peer.ipv4.isNotBlank()) {
             updateServer(serverId) {
                 it.copy(
@@ -710,6 +720,14 @@ class SessionController(
             publish(state.copy(screen = AppScreen.Remote, activeServerId = serverId, busy = true, error = null))
             rdpSessions[serverId]?.let {
                 publish(state.copy(busy = false))
+                return@launch
+            }
+            // A quick reachability probe turns "RDP connect call failed" into a
+            // sentence the user can act on, and it is logged either way.
+            val reachable = node.probe(connection.address, connection.port, 8000)
+            if (!reachable) {
+                publish(state.copy(busy = false))
+                fail("rdp", "connection refused: ${connection.address}:${connection.port} is not reachable over the tunnel")
                 return@launch
             }
             val rdp = RdpSession(context, node, session, store)

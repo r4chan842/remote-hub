@@ -306,12 +306,21 @@ class Provisioner(
         emit(onEvent)
     }
 
-    private fun newSessionId(name: String): String {
-        val slug = name.lowercase().map { if (it.isLetterOrDigit()) it else '-' }.joinToString("")
-            .trim('-').take(20).ifBlank { "session" }
-        val suffix = randomSlug(6)
-        return "$slug-$suffix"
-    }
+    private fun newSessionId(name: String): String = sessionIdFor(name)
+}
+
+/**
+ * Builds the workflow input and the tailnet hostname suffix. Kept at file level so
+ * the ASCII rule can be tested directly.
+ */
+internal fun sessionIdFor(name: String): String {
+    // Only ASCII survives. isLetterOrDigit() also accepts Persian, Arabic or
+    // Cyrillic letters, and such an id would be rejected by the workflow's
+    // ^[a-z0-9-]{3,40}$ check and by Tailscale's hostname rules.
+    val slug = name.lowercase().map { if (it in 'a'..'z' || it in '0'..'9') it else '-' }
+        .joinToString("").trim('-').take(20).ifBlank { "session" }
+    val suffix = randomSlug(6)
+    return "$slug-$suffix"
 }
 
 private val BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".encodeToByteArray()

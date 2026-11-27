@@ -86,8 +86,13 @@ class ProvisionerTest {
         // Secrets are masked before use and never echoed.
         assertTrue(yaml.contains("::add-mask::"))
         assertTrue(!yaml.contains("Write-Host \"Password"))
-        // The node is ephemeral and always logs out.
-        assertTrue(yaml.contains("--ephemeral"))
+        // Ephemerality is a property of the auth key. "tailscale up" in v1.104.7 has
+        // no --ephemeral flag, and passing one aborts the step with "flag provided
+        // but not defined". Unattended mode keeps the tunnel up on a runner where
+        // nobody is logged in interactively.
+        assertTrue(yaml.contains("\"--unattended=true\""))
+        assertTrue(yaml.contains("--auth-key="))
+        assertTrue(yaml.lines().none { it.trim().startsWith("\"--ephemeral") })
         assertTrue(yaml.contains("logout"))
         assertTrue(yaml.contains("if: always()"))
         // The installer is pinned and checksum-verified.
