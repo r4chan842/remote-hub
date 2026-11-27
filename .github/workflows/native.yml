@@ -48,7 +48,7 @@ jobs:
           cache: false
 
       - name: Select Android NDK
-        run: ./scripts/setup-ndk.sh
+        run: bash scripts/setup-ndk.sh
 
       - name: Resolve Go module graph
         working-directory: native/tsbridge
@@ -60,7 +60,7 @@ jobs:
 
       - name: Build AAR
         working-directory: native/tsbridge
-        run: ./build-aar.sh
+        run: bash build-aar.sh
 
       - name: Verify AAR contents
         working-directory: native/tsbridge
@@ -101,7 +101,7 @@ jobs:
             ninja-build cmake pkg-config nasm perl python3 xz-utils
 
       - name: Select Android NDK
-        run: ./scripts/setup-ndk.sh
+        run: bash scripts/setup-ndk.sh
 
       - name: Fetch FreeRDP source
         run: |
@@ -117,7 +117,7 @@ jobs:
       - name: Build bridge
         env:
           ANDROID_ABI: ${{ matrix.abi }}
-        run: ./native/rdpbridge/build.sh
+        run: bash native/rdpbridge/build.sh
 
       - name: Verify shared objects
         env:
