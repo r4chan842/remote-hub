@@ -62,7 +62,7 @@ fun GitHubAuthContent(
     val status = LocalStatusColors.current
 
     Column(
-        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (account != null) {

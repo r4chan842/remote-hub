@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -123,7 +124,16 @@ fun AppShell(
                 containerColor = scheme.surface,
                 topBar = bar,
                 floatingActionButton = { if (floatingAction != null) floatingAction() },
-                content = content,
+                content = { padding ->
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(padding),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        Box(Modifier.widthIn(max = 1040.dp).fillMaxHeight()) {
+                            content(PaddingValues(0.dp))
+                        }
+                    }
+                },
             )
         }
     } else {

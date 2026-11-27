@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import app.remotehub.design.LocalStatusColors
 import app.remotehub.design.Symbol
@@ -80,9 +81,9 @@ fun RemoteContent(
                         color = scheme.onSurfaceVariant,
                     )
                 }
-                TagChip("${metrics.latencyMillis} ms", tone = colors.successContainer, content = colors.onSuccessContainer)
-                TagChip("${metrics.framesPerSecond} fps")
-                TagChip("${metrics.kilobitsPerSecond} kbps")
+                TagChip("${metrics.latencyMillis} ms", tone = colors.successContainer, content = colors.onSuccessContainer, ltr = true)
+                TagChip("${metrics.framesPerSecond} fps", ltr = true)
+                TagChip("${metrics.kilobitsPerSecond} kbps", ltr = true)
             }
         }
 
@@ -127,7 +128,7 @@ fun RemoteContent(
                             Surface(color = Color(0xFF1D232B), shape = RoundedCornerShape(8.dp)) {
                                 Text(
                                     metrics.resolutionLabel,
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr),
                                     color = Color(0xFF9FB0C4),
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                 )

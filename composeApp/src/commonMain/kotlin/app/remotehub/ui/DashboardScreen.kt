@@ -18,6 +18,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import app.remotehub.design.InfoRow
 import app.remotehub.design.MetricTile
@@ -58,7 +59,7 @@ fun DashboardContent(
     val soonest = servers.filter { it.state != ServerState.Stopped }.minByOrNull { it.remainingFraction }
 
     Column(
-        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (!setupComplete) {
@@ -169,7 +170,11 @@ private fun ServerCard(
                     color = scheme.primary,
                     trackColor = scheme.surfaceVariant,
                 )
-                Text("$doneCount / ${server.steps.size}", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+                Text(
+                    "$doneCount / ${server.steps.size}",
+                    style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr),
+                    color = scheme.onSurfaceVariant,
+                )
             }
         } else if (server.connection != null) {
             Column(Modifier.padding(top = 12.dp)) {

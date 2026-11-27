@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import app.remotehub.domain.ServerState
 import app.remotehub.domain.StepStatus
@@ -105,9 +106,21 @@ fun StatePill(state: ServerState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun TagChip(text: String, modifier: Modifier = Modifier, tone: Color = MaterialTheme.colorScheme.secondaryContainer, content: Color = MaterialTheme.colorScheme.onSecondaryContainer) {
+fun TagChip(
+    text: String,
+    modifier: Modifier = Modifier,
+    tone: Color = MaterialTheme.colorScheme.secondaryContainer,
+    content: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+    ltr: Boolean = false,
+) {
     Surface(color = tone, contentColor = content, shape = RoundedCornerShape(8.dp), modifier = modifier) {
-        Text(text, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall.copy(
+                textDirection = if (ltr) TextDirection.Ltr else TextDirection.Content,
+            ),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -126,7 +139,10 @@ fun InfoRow(label: String, value: String, modifier: Modifier = Modifier, monospa
         )
         Text(
             value,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                textDirection = if (monospace) TextDirection.Ltr else TextDirection.Content,
+                textAlign = if (monospace) TextAlign.Start else TextAlign.Start,
+            ),
             fontWeight = if (monospace) FontWeight.Medium else FontWeight.Normal,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
@@ -285,7 +301,7 @@ fun TimeMeter(fraction: Float, remaining: String, caption: String, modifier: Mod
             Text(caption, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             Text(
                 remaining,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleMedium.copy(textDirection = TextDirection.Ltr),
                 color = if (warning) status.warning else scheme.onSurface,
             )
         }
