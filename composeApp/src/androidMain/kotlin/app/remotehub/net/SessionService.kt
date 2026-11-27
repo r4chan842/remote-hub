@@ -23,7 +23,7 @@ class SessionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification: Notification = NotificationCompat.Builder(this, RemoteHubApplication.SESSION_CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.session_running))
             .setContentText(if (remaining.isBlank()) label else "$label · $remaining")
             .setOngoing(true)

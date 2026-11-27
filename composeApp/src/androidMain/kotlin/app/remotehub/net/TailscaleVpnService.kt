@@ -140,7 +140,7 @@ class TailscaleVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, RemoteHubApplication.SESSION_CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_vpn_ic)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.vpn_notification_title))
             .setContentText(address)
             .setOngoing(true)
