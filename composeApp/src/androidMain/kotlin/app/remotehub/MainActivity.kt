@@ -33,11 +33,16 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    fun openExternal(url: String) {
-        runCatching {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
-        }
+    fun openExternal(url: String): Boolean {
+        if (url.isBlank()) return false
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { startActivity(view); true }
+            .recoverCatching { startActivity(Intent.createChooser(view, url)); true }
+            .getOrElse {
+                android.widget.Toast.makeText(this, url, android.widget.Toast.LENGTH_LONG).show()
+                false
+            }
     }
 }

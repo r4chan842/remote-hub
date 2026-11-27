@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -58,6 +59,9 @@ fun GitHubAuthContent(
     onValidatePat: () -> Unit,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
+    onCreateToken: () -> Unit = {},
+    error: String? = null,
+    busy: Boolean = false,
 ) {
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
@@ -158,16 +162,33 @@ fun GitHubAuthContent(
 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FilledTonalButton(onClick = onCopyCode, shape = MaterialTheme.shapes.large, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick = onCopyCode,
+                        enabled = deviceFlow.userCode.isNotBlank(),
+                        shape = MaterialTheme.shapes.medium,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.weight(1f).height(40.dp),
+                    ) {
                         Symbol(Symbols.contentCopy, size = 18.dp)
-                        Text("  " + s.copyCode, style = MaterialTheme.typography.labelLarge)
+                        Text(" " + s.copyCode, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
-                    Button(onClick = onOpenGitHub, shape = MaterialTheme.shapes.large, modifier = Modifier.weight(1f)) {
-                        Symbol(Symbols.openInNew, size = 18.dp)
-                        Text("  " + s.openGithub, style = MaterialTheme.typography.labelLarge)
+                    Button(
+                        onClick = onOpenGitHub,
+                        enabled = !busy,
+                        shape = MaterialTheme.shapes.medium,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.weight(1f).height(40.dp),
+                    ) {
+                        if (busy) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Symbol(Symbols.openInNew, size = 18.dp)
+                        Text(" " + s.openGithub, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
+                }
+                if (!error.isNullOrBlank()) {
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = scheme.error, modifier = Modifier.padding(top = 10.dp))
                 }
 
                 if (deviceFlow.phase == DeviceFlowPhase.WaitingForApproval || deviceFlow.phase == DeviceFlowPhase.CodeIssued) {
@@ -205,10 +226,22 @@ fun GitHubAuthContent(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
                     requiredScopes.forEach { TagChip(it) }
                 }
+                if (!error.isNullOrBlank()) {
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = scheme.error, modifier = Modifier.padding(top = 10.dp))
+                }
+                OutlinedButton(
+                    onClick = onCreateToken,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp).height(40.dp),
+                ) {
+                    Symbol(Symbols.openInNew, size = 18.dp)
+                    Text("  " + s.openGithub, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
                 Button(
                     onClick = onValidatePat,
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
+                    enabled = !busy && patInput.isNotBlank(),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(40.dp),
                 ) {
                     Symbol(Symbols.shield, size = 18.dp)
                     Text("  " + s.validateAndSave, style = MaterialTheme.typography.labelLarge)

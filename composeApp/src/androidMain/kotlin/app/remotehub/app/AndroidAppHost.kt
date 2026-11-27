@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import app.remotehub.MainActivity
+import app.remotehub.github.CREATE_TOKEN_URL
 import app.remotehub.data.SecureStore
 import app.remotehub.data.StoreKeys
 import app.remotehub.data.createSecretBox
@@ -73,10 +74,19 @@ class AndroidAppHost(private val activity: ComponentActivity) {
         private set
 
     private var ticker: Job? = null
-    private var deviceFlowClient: DeviceFlowClient? = null
+    private var deviceJob: Job? = null
+    private var deviceBusy by mutableStateOf(false)
+    private var deviceError by mutableStateOf<String?>(null)
 
     init {
-        controller.onState = { state = it }
+        controller.onState = { next ->
+            state = next.copy(
+                authMethod = state.authMethod,
+                clientIdInput = store.get(StoreKeys.GITHUB_CLIENT_ID) ?: "",
+                patInput = if (next.account == null) state.patInput else "",
+                deviceFlow = state.deviceFlow,
+            )
+        }
         controller.onEffect = { effect -> handleEffect(effect) }
         controller.restore()
     }
@@ -119,40 +129,58 @@ class AndroidAppHost(private val activity: ComponentActivity) {
 
     fun release() {
         ticker?.cancel()
-        deviceFlowClient?.close()
+        deviceJob?.cancel()
         controller.release()
         scope.cancel()
     }
 
     fun startDeviceFlow() {
-        val clientId = state.clientIdInput.trim()
+        val clientId = state.clientIdInput.trim().ifBlank { app.remotehub.BuildConfig.GITHUB_CLIENT_ID.trim() }
         if (clientId.isBlank()) {
-            state = state.copy(error = stringsFor(state.localeTag).oauthClientIdHint)
+            // No OAuth App available: GitHub cannot issue a device code. Switch to the
+            // token tab and open GitHub's token page with the required scopes pre-selected.
+            state = state.copy(authMethod = AuthMethod.PersonalAccessToken)
+            handleEffect(SideEffect.OpenUrl(CREATE_TOKEN_URL))
             return
         }
-        scope.launch {
-            deviceFlowClient?.close()
-            val client = DeviceFlowClient(clientId).also { deviceFlowClient = it }
-            state = state.copy(busy = true, error = null)
-            runCatching { client.requestCode() }
-                .onSuccess { code ->
-                    state = state.copy(
-                        busy = false,
-                        deviceFlow = DeviceFlowState(
-                            phase = DeviceFlowPhase.CodeIssued,
-                            userCode = code.userCode,
-                            verificationUrl = code.verificationUri,
-                            secondsRemaining = code.expiresIn,
-                            pollIntervalSeconds = code.interval,
-                        ),
-                    )
-                    handleEffect(SideEffect.Copy("user code", code.userCode))
-                    pollDeviceFlow(client, code)
-                }
-                .onFailure { error ->
-                    state = state.copy(busy = false, error = error.message ?: "device flow failed")
-                }
+        if (deviceJob?.isActive == true) return
+        deviceJob = scope.launch {
+            val client = DeviceFlowClient(clientId)
+            deviceBusy = true
+            deviceError = null
+            try {
+                val code = client.requestCode()
+                deviceBusy = false
+                state = state.copy(
+                    deviceFlow = DeviceFlowState(
+                        phase = DeviceFlowPhase.CodeIssued,
+                        userCode = code.userCode,
+                        verificationUrl = code.verificationUri,
+                        secondsRemaining = code.expiresIn,
+                        pollIntervalSeconds = code.interval,
+                    ),
+                )
+                // The code stays on screen; it is also copied so it can be pasted on GitHub.
+                handleEffect(SideEffect.Copy(stringsFor(state.localeTag).copyCode, code.userCode))
+                pollDeviceFlow(client, code)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                deviceError = deviceFlowError(error)
+                state = state.copy(deviceFlow = AppState().deviceFlow)
+            } finally {
+                deviceBusy = false
+                client.close()
+            }
         }
+    }
+
+    private fun deviceFlowError(error: Throwable): String = when {
+        error is app.remotehub.github.GitHubException && (error.status == 404 || error.status == 401) ->
+            "Client ID is invalid, or Device Flow is not enabled for this OAuth App."
+        error.message?.contains("device_flow_disabled") == true ->
+            "Enable \"Device Flow\" in the OAuth App settings on GitHub."
+        else -> error.message ?: "Could not reach GitHub. Check the connection and try again."
     }
 
     private suspend fun pollDeviceFlow(client: DeviceFlowClient, code: app.remotehub.github.DeviceCodeResponse) {
@@ -169,9 +197,9 @@ class AndroidAppHost(private val activity: ComponentActivity) {
             is DevicePoll.Failed -> {
                 val phase = if (result.reason == "expired_token") DeviceFlowPhase.Expired else DeviceFlowPhase.Denied
                 state = state.copy(
-                    deviceFlow = state.deviceFlow.copy(phase = phase),
-                    error = result.reason,
+                    deviceFlow = state.deviceFlow.copy(phase = phase, userCode = "", secondsRemaining = 0),
                 )
+                deviceError = result.reason
             }
             else -> Unit
         }
@@ -276,7 +304,13 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                                 store.put(StoreKeys.GITHUB_CLIENT_ID, it.trim())
                             },
                             requiredScopes = GitHubClient.REQUIRED_SCOPES,
-                            onMethodChange = { state = state.copy(authMethod = it) },
+                            onMethodChange = { method ->
+                                if (method != state.authMethod) {
+                                    deviceJob?.cancel()
+                                    deviceError = null
+                                    state = state.copy(authMethod = method, deviceFlow = AppState().deviceFlow)
+                                }
+                            },
                             onPatChange = { state = state.copy(patInput = it) },
                             onCopyCode = { handleEffect(SideEffect.Copy("user code", state.deviceFlow.userCode)) },
                             onOpenGitHub = {
@@ -287,7 +321,10 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                                 controller.acceptToken(state.patInput, AuthMethod.PersonalAccessToken, null)
                             },
                             onDisconnect = { controller.disconnectGitHub() },
+                            onCreateToken = { handleEffect(SideEffect.OpenUrl(CREATE_TOKEN_URL)) },
                             modifier = contentModifier,
+                            error = if (state.authMethod == AuthMethod.DeviceFlow) deviceError ?: state.error else state.error,
+                            busy = state.busy || deviceBusy,
                         )
                         state.guideId != null -> SettingsGuides(
                             guideId = state.guideId!!,

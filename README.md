@@ -33,6 +33,12 @@ gradle :composeApp:renderScreens
 
 `renderScreens` renders each screen at phone and desktop sizes, in light and dark themes, in Persian (RTL) and English (LTR), and writes PNG files to `composeApp/build/screens`.
 
+## GitHub sign-in
+
+- Use an existing GitHub account and authorize Device Flow in your browser, or use a personal access token with access to your own repository.
+- To ship a build with Device Flow preconfigured on Android, enable Device Flow in your GitHub OAuth App and set the repository **variable** `RH_GITHUB_CLIENT_ID` to the public Client ID. Alternatively pass `-PgithubClientId=...` when building locally.
+- If no Client ID was bundled, enter one in the Device Flow tab or use the personal token tab. The Windows app also accepts the `RH_GITHUB_CLIENT_ID` environment variable. Never enter an OAuth client secret in the app.
+
 ## Repository layout
 
 ```

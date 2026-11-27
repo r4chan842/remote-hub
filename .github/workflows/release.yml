@@ -1,45 +1,109 @@
+# The only release publication hook. Publishes a GitHub Release with signed per-ABI
+# APKs (+ universal fallback) only when:
+#   * triggered by a vX.Y.Z tag push whose commit is on main, or by workflow_dispatch
+#     run from the main branch by a user with write/maintain/admin permission;
+#   * the CI gate (tests, lint, packaging checks) passed;
+#   * the persistent signing key secret ANDROID_KEYSTORE_BASE64 is configured (no throwaway key);
+#   * the APKs are signed by EXPECTED_CERT_SHA256 (repository variable or the published v1.0.0 certificate).
+# Use the "release" environment's protection rules for an extra manual approval.
 name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: Version tag to publish
+        description: "Release tag (vMAJOR.MINOR.PATCH)"
         required: true
-        type: string
+        default: "v1.0.1"
+      version_code:
+        description: "Optional base versionCode (default: UTC yyMMddHH; minimum 2611272)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Build, sign and verify only; do not publish"
+        type: boolean
+        default: true
 
 permissions:
-  contents: write
-  actions: read
+  contents: read
 
-env:
-  GRADLE_VERSION: "8.11.1"
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Build and publish Android release
+  gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version_name: ${{ steps.v.outputs.version_name }}
+      version_code: ${{ steps.v.outputs.version_code }}
+      publish: ${{ steps.v.outputs.publish }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - name: Resolve version
-        id: version
+        with:
+          fetch-depth: 0
+      - name: Validate ref, actor and version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_CODE: ${{ inputs.version_code }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
+          PERM="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_TRIGGERING_ACTOR}/permission" --jq .permission)"
+          case "$PERM" in admin|maintain|write) ;; *) echo "release requires repository write permission"; exit 1;; esac
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+            [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "dispatch must run from main (got $GITHUB_REF)"; exit 1; }
+            PUBLISH=$([ "$DRY_RUN" = "true" ] && echo false || echo true)
           else
-            TAG="${GITHUB_REF_NAME}"
+            TAG="${GITHUB_REF#refs/tags/}"
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $TAG is not on main"; exit 1; }
+            PUBLISH=true
           fi
-          VERSION="${TAG#v}"
-          CODE="$(date -u +%y%m%d%H)"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "Releasing $TAG (versionName=$VERSION versionCode=$CODE)"
+          [[ "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || { echo "bad tag '$TAG'"; exit 1; }
+          if [ "$EVENT" = "workflow_dispatch" ] && git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            [ "$(git rev-list -n1 "$TAG")" = "$GITHUB_SHA" ] || { echo "tag $TAG exists on another commit"; exit 1; }
+          fi
+          CODE="${INPUT_CODE:-$(date -u +%y%m%d%H)}"
+          [[ "$CODE" =~ ^[1-9][0-9]{0,8}$ ]] && [ "$CODE" -ge 2611272 ] && [ "$CODE" -le 210000000 ] \
+            || { echo "versionCode $CODE must be >= 2611272 and <= 210000000"; exit 1; }
+          {
+            echo "tag=$TAG"
+            echo "version_name=${TAG#v}"
+            echo "version_code=$CODE"
+            echo "publish=$PUBLISH"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG versionCode base=$CODE publish=$PUBLISH"
+
+  ci:
+    needs: gate
+    uses: ./.github/workflows/android.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      version_code: ${{ needs.gate.outputs.version_code }}
+      version_name: ${{ needs.gate.outputs.version_name }}
+
+  release:
+    needs: [gate, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: write
+      actions: read
+    env:
+      TAG: ${{ needs.gate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -48,91 +112,89 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1
         with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
+          gradle-version: "8.11.1"
+          cache-read-only: true
 
-      - name: Select Android NDK
-        run: bash scripts/setup-ndk.sh
-
-      - name: Fetch native engines
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/fetch-native.sh
-
-      - name: Run the full test suite
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if gradle :composeApp:desktopTest :composeApp:testDebugUnitTest --no-daemon; then
-              break
-            fi
-            echo "attempt $attempt failed, retrying"
-            sleep 20
-            if [ "$attempt" = "3" ]; then exit 1; fi
-          done
-          python3 scripts/test-summary.py
-
-      - name: Prepare signing key
+      - name: Prepare persistent signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: bash scripts/prepare-signing.sh
-
-      - name: Assemble release APK
         run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if gradle :composeApp:assembleRelease --no-daemon \
-              -PappVersionName="${{ steps.version.outputs.version }}" \
-              -PappVersionCode="${{ steps.version.outputs.code }}"; then
-              exit 0
-            fi
-            echo "attempt $attempt failed, retrying"
-            sleep 20
-          done
-          exit 1
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Existing ANDROID_* signing secrets are required; no throwaway key is allowed." >&2
+            exit 1
+          fi
+          bash scripts/prepare-signing.sh
 
-      - name: Verify APK
+      - name: Select Android NDK
+        run: bash scripts/setup-ndk.sh
+
+      - name: Fetch native artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/fetch-native.sh
+
+      - name: Unit tests (results feed the release notes)
+        run: gradle --no-daemon :composeApp:desktopTest :composeApp:testDebugUnitTest && python3 scripts/test-summary.py
+
+      - name: Build signed per-ABI APKs
+        env:
+          RH_GITHUB_CLIENT_ID: ${{ vars.RH_GITHUB_CLIENT_ID }}
+        run: >
+          gradle --no-daemon :composeApp:assembleRelease
+          -PappVersionCode=${{ needs.gate.outputs.version_code }}
+          -PappVersionName=${{ needs.gate.outputs.version_name }}
+
+      - name: Verify APKs
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.EXPECTED_CERT_SHA256 || 'ce77d839ef8b1dea4a71e2d7e1269ec52309272a43581e68ee24437ec3566c83' }}
         run: bash scripts/verify-apk.sh
 
-      - name: Stage release assets
-        id: assets
+      - name: Stage assets
         run: |
           set -euo pipefail
           mkdir -p release
-          APK="$(find composeApp/build/outputs/apk/release -name '*.apk' | head -1)"
-          TARGET="release/RemoteHub-${{ steps.version.outputs.version }}-android.apk"
-          cp "$APK" "$TARGET"
-          cp build-report/apk-report.txt release/apk-report.txt
+          while IFS=$'\t' read -r abi apk; do
+            cp "$apk" "release/RemoteHub-${TAG}-${abi}.apk"
+          done < build-report/apk-assets.tsv
+          cp build-report/apk-report.txt release/
           (cd release && sha256sum *.apk > SHA256SUMS.txt)
-          cat release/SHA256SUMS.txt
-          echo "dir=release" >> "$GITHUB_OUTPUT"
+          CERT="$(grep -m1 'certificate SHA-256 digest' build-report/apk-report.txt | awk '{print $NF}')"
+          echo "CERT_SHA256=$CERT" >> "$GITHUB_ENV"
+          ls -l release
 
-      - name: Write release notes
+      - name: Release notes
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          FREERDP_VERSION: ${{ vars.FREERDP_VERSION }}
         run: python3 scripts/release-notes.py
 
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+      - name: Upload build (always kept as workflow artifact)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: RemoteHub ${{ steps.version.outputs.version }}
-          body_path: release/NOTES.md
-          files: |
-            release/*.apk
-            release/SHA256SUMS.txt
-            release/apk-report.txt
-          draft: false
-          prerelease: false
-          fail_on_unmatched_files: true
+          name: release-${{ env.TAG }}
+          path: release/
+          retention-days: 14
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: release-diagnostics
-          path: |
-            build-report
-            composeApp/build/test-results
-          retention-days: 30
+      - name: Publish GitHub Release
+        if: needs.gate.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; not overwriting" >&2
+            exit 1
+          fi
+          # Recheck a tag that could have been created or moved while CI was running.
+          TAG_COMMIT="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha 2>/dev/null || true)"
+          ARGS=()
+          if [ -n "$TAG_COMMIT" ] || [ "$GITHUB_EVENT_NAME" = push ]; then
+            TAG_COMMIT="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+            [ "$TAG_COMMIT" = "$GITHUB_SHA" ] || { echo "Tag no longer points at the tested commit" >&2; exit 1; }
+            ARGS+=(--verify-tag)
+          fi
+          gh release create "$TAG" "${ARGS[@]}" --target "$GITHUB_SHA" --title "RemoteHub $TAG" \
+            --notes-file release/NOTES.md \
+            release/*.apk release/SHA256SUMS.txt release/apk-report.txt
