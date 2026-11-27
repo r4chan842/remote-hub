@@ -26,3 +26,16 @@
 -keepclassmembers class app.remotehub.net.TailnetPeer { *; }
 -keepclassmembers class app.remotehub.net.** { *; }
 -keep,includedescriptorclasses class io.ktor.** { *; }
+
+# Ktor ships a JVM-only IntelliJ debugger probe. Those java.lang.management types
+# do not exist on Android and the probe is never reached there, so R8 may ignore
+# the reference instead of failing the release build.
+-dontwarn java.lang.management.ManagementFactory
+-dontwarn java.lang.management.RuntimeMXBean
+
+# libsodium loads its native library through JNA and reflects over these types.
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.Library { *; }
+-keep class com.goterl.lazysodium.** { *; }
+-dontwarn com.sun.jna.**
+-dontwarn java.awt.**
