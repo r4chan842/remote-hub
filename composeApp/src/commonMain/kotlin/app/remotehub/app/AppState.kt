@@ -51,6 +51,10 @@ data class AppState(
     // The desktop owns the whole screen when this is set; it never disconnects.
     val remoteFullscreen: Boolean = false,
     val remoteConnecting: Boolean = false,
+    // The soft keyboard needs a focused editor; this drives the invisible one.
+    val keyboardVisible: Boolean = false,
+    // Direct touch has no cursor, so the right-click tool arms the next tap.
+    val rightClickArmed: Boolean = false,
 
     // device-wide tailnet
     val deviceVpn: Boolean = false,

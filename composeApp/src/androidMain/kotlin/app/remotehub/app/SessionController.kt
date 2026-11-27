@@ -4,7 +4,6 @@ import android.app.NotificationManager
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.view.inputmethod.InputMethodManager
 import androidx.core.app.NotificationCompat
 import app.remotehub.R
 import app.remotehub.RemoteHubApplication
@@ -75,6 +74,9 @@ class SessionController(
     private var vpnRebuildAttempts = 0
     private val metricsCache = mutableMapOf<String, RemoteMetrics>()
     private var provisionJob: Job? = null
+
+    /** Where to return when leaving Settings; a live run always wins. */
+    private var settingsReturn: AppScreen? = null
     private var watchJob: Job? = null
     private var notificationsAllowed = false
     private val alerted = mutableSetOf<String>()
@@ -824,7 +826,21 @@ class SessionController(
                 )
             }
             persistServers()
-            publish(state.copy(busy = false, steps = emptyList(), progressLog = emptyList()))
+            publish(
+                state.copy(
+                    busy = false,
+                    provisioning = true,
+                    steps = listOf(
+                        ProvisionStep(
+                            id = "rerun",
+                            status = StepStatus.Running,
+                            detail = "run ${session.runId}",
+                            elapsedMillis = null,
+                        ),
+                    ),
+                    progressLog = listOf("re-running workflow run ${session.runId}"),
+                ),
+            )
             // GitHub needs a moment to open the new attempt; until then the run still
             // reads "completed" and the watcher would call the session finished.
             for (attempt in 1..20) {
@@ -868,6 +884,15 @@ class SessionController(
                     }
                 }
                 val ended = run.status == "completed"
+                // The Progress screen reads state.steps, not server.steps. Re-running
+                // an existing session only updated the model, so the screen showed
+                // "running" with no process until the run finished.
+                if (state.activeServerId == serverId) {
+                    val logLine = "run ${run.runNumber}: ${run.status}" +
+                        (run.conclusion?.let { " ($it)" } ?: "")
+                    val log = (state.progressLog + logLine).takeLast(120)
+                    publish(state.copy(steps = steps, progressLog = log, provisioning = !ended))
+                }
                 updateServer(serverId) { current ->
                     current.copy(
                         steps = steps,
@@ -887,7 +912,8 @@ class SessionController(
                 if (state.servers.firstOrNull { it.id == serverId }?.connection?.address.isNullOrBlank()) {
                     resolveEndpoint(serverId)
                 }
-                delay(10_000)
+                // 10s made a re-run look frozen; 3s keeps the step list live.
+                delay(3_000)
             }
         }
     }
@@ -1130,12 +1156,58 @@ class SessionController(
         updateServer(serverId) { if (it.state == ServerState.Connected) it.copy(state = ServerState.Ready) else it }
         stopSessionService()
         if (state.remoteFullscreen) onEffect(SideEffect.Immersive(false))
-        publish(state.copy(screen = AppScreen.Detail, remoteFullscreen = false, remoteConnecting = false))
+        publish(
+            state.copy(
+                screen = AppScreen.Detail,
+                remoteFullscreen = false,
+                remoteConnecting = false,
+                keyboardVisible = false,
+                rightClickArmed = false,
+            ),
+        )
     }
 
+    /**
+     * Toggling the IME alone did nothing: Android delivers keystrokes through an
+     * InputConnection, which only exists for a focused text editor, and the desktop
+     * is a Canvas. This drives the invisible editor in RdpKeyboardTarget instead.
+     */
     fun showKeyboard() {
-        context.getSystemService(InputMethodManager::class.java)
-            ?.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+        publish(state.copy(keyboardVisible = !state.keyboardVisible))
+    }
+
+    fun hideKeyboard() {
+        if (state.keyboardVisible) publish(state.copy(keyboardVisible = false))
+    }
+
+    fun onImeVisibility(visible: Boolean) {
+        if (state.keyboardVisible != visible) publish(state.copy(keyboardVisible = visible))
+    }
+
+    fun typeRemote(serverId: String, text: String) {
+        rdpSessions[serverId]?.typeText(text)
+    }
+
+    fun remoteKey(serverId: String, scancode: Int, down: Boolean) {
+        rdpSessions[serverId]?.sendKey(scancode, down)
+    }
+
+    /**
+     * Mouse pointer mode has a visible cursor, so the tool right-clicks immediately.
+     * Direct touch has none, so it arms the next tap instead of guessing a position.
+     */
+    fun rightClickRemote(serverId: String) {
+        val session = rdpSessions[serverId] ?: return
+        if (state.trackpadMode) {
+            session.rightClickAtPointer()
+            if (state.rightClickArmed) publish(state.copy(rightClickArmed = false))
+        } else {
+            publish(state.copy(rightClickArmed = !state.rightClickArmed))
+        }
+    }
+
+    fun consumeRightClick() {
+        if (state.rightClickArmed) publish(state.copy(rightClickArmed = false))
     }
 
     fun pushClipboard(serverId: String) {
@@ -1302,7 +1374,26 @@ class SessionController(
 
     fun goSetup() = publish(state.copy(screen = AppScreen.Setup, error = null, highlightItem = null))
 
-    fun goSettings() = publish(state.copy(screen = AppScreen.Settings))
+    /**
+     * Back from Settings used to hard-code goSetup(), so leaving Settings during a
+     * provision dropped the Progress screen and the run only reappeared when it
+     * finished. Remember where the user came from and prefer a live run.
+     */
+    fun goSettings() {
+        settingsReturn = state.screen
+        publish(state.copy(screen = AppScreen.Settings))
+    }
+
+    fun leaveSettings() {
+        val target = when {
+            state.provisioning -> AppScreen.Progress
+            settingsReturn != null && settingsReturn != AppScreen.Settings &&
+                settingsReturn != AppScreen.Guide -> settingsReturn!!
+            else -> AppScreen.Setup
+        }
+        settingsReturn = null
+        publish(state.copy(screen = target, guideId = null))
+    }
 
     fun goServers() = publish(state.copy(screen = AppScreen.Servers, error = null, activeServerId = null))
 

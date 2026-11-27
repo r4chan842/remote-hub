@@ -38,6 +38,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 private const val LONG_PRESS_MS = 450L
 private const val DOUBLE_TAP_MS = 320L
 private const val TAP_MS = 260L
+private const val MULTI_TAP_MS = 420L
 private const val SCROLL_STEP_PX = 26f
 private const val TRACKPAD_GAIN = 1.6f
 private const val WHEEL_NOTCH = 120
@@ -60,7 +61,13 @@ private const val MAX_ZOOM = 5f
  * combining it with an explicit click sent two clicks per tap.
  */
 @Composable
-fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier = Modifier) {
+fun RdpSurface(
+    session: RdpSession?,
+    trackpadMode: Boolean,
+    modifier: Modifier = Modifier,
+    rightClickArmed: Boolean = false,
+    onRightClickConsumed: () -> Unit = {},
+) {
     val s = LocalStrings.current
     val haptics = LocalHapticFeedback.current
     var frameTick by remember { mutableIntStateOf(0) }
@@ -160,6 +167,13 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                     var scrollAccX = 0f
                     var scrollAccY = 0f
                     var travel = 0f
+                    // Tracked only while two fingers are actually down. Sharing the
+                    // single-finger counter meant the stagger between the two fingers,
+                    // and the centroid jump when one lifted first, always pushed the
+                    // total past the tap threshold, so a two-finger tap never fired.
+                    var multiTravel = 0f
+                    var multiStartedAt = 0L
+                    var scrolled = false
                     val startedAt = SystemClock.uptimeMillis()
                     val longPressAt = startedAt + LONG_PRESS_MS
                     val nearLastTap = startedAt - lastTapAt < DOUBLE_TAP_MS &&
@@ -169,6 +183,8 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
 
                     fun targetX() = if (trackpadMode) hx(cursorX) else hx(lastX)
                     fun targetY() = if (trackpadMode) hy(cursorY) else hy(lastY)
+
+                    fun remember() = session.rememberPointer(targetX(), targetY())
 
                     if (trackpadMode) session.sendMove(hx(cursorX), hy(cursorY))
 
@@ -208,14 +224,22 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                                     }
                                 }
                                 multi -> {
-                                    if (!handled && !pinched && travel < slop &&
-                                        now - startedAt < TAP_MS
-                                    ) {
+                                    val quick = multiStartedAt > 0L && now - multiStartedAt < MULTI_TAP_MS
+                                    if (!pinched && !scrolled && multiTravel < slop * 2.5f && quick) {
+                                        remember()
                                         session.sendRightClick(targetX(), targetY())
                                         lastMultiTapAt = now
                                     }
                                 }
-                                longPressed -> session.sendRightClick(targetX(), targetY())
+                                longPressed -> {
+                                    remember()
+                                    session.sendRightClick(targetX(), targetY())
+                                }
+                                rightClickArmed -> {
+                                    remember()
+                                    session.sendRightClick(targetX(), targetY())
+                                    onRightClickConsumed()
+                                }
                                 else -> {
                                     // Snap a repeat tap onto the previous pixel so the
                                     // host resolves two clicks as a double click.
@@ -231,6 +255,7 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                                         trackpadMode -> cursorY
                                         else -> lastY
                                     }
+                                    session.rememberPointer(hx(ax), hy(ay))
                                     session.sendClick(hx(ax), hy(ay))
                                     lastTapAt = now
                                     lastTapX = if (trackpadMode) cursorX else startX
@@ -252,6 +277,7 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
 
                             if (!multi) {
                                 multi = true
+                                multiStartedAt = SystemClock.uptimeMillis()
                                 if (dragButton != 0) {
                                     session.sendButtonUp(dragButton, targetX(), targetY())
                                     dragButton = 0
@@ -269,11 +295,18 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                                 continue@gesture
                             }
 
+                            if (pressed.size < 2) {
+                                // One finger lifted first: freeze the geometry so the
+                                // centroid does not jump and spoil the tap test.
+                                event.changes.forEach { it.consume() }
+                                continue@gesture
+                            }
                             val dx = cx - centroidX
                             val dy = cy - centroidY
                             centroidX = cx
                             centroidY = cy
                             travel += abs(dx) + abs(dy)
+                            multiTravel += abs(dx) + abs(dy)
 
                             if (dragButton == 2) {
                                 if (trackpadMode) {
@@ -319,6 +352,7 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                                     // Touch: content follows the fingers.
                                     // Mouse pointer: the Windows touchpad convention.
                                     val sign = if (trackpadMode) -1 else 1
+                                    scrolled = true
                                     if (stepsY != 0) session.sendWheel(sign * stepsY * WHEEL_NOTCH, tx, ty)
                                     if (stepsX != 0) {
                                         session.sendWheel(sign * stepsX * WHEEL_NOTCH, tx, ty, horizontal = true)
@@ -339,7 +373,8 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                         lastY = py
                         travel += abs(dx) + abs(dy)
 
-                        if (!moved && (abs(px - startX) > slop || abs(py - startY) > slop)) {
+                        val dragSlop = if (trackpadMode) slop else slop * 1.6f
+                        if (!moved && (abs(px - startX) > dragSlop || abs(py - startY) > dragSlop)) {
                             moved = true
                             dragButton = when {
                                 longPressed -> 2
@@ -361,6 +396,7 @@ fun RdpSurface(session: RdpSession?, trackpadMode: Boolean, modifier: Modifier =
                         } else if (dragButton != 0) {
                             session.sendMove(hx(px), hy(py))
                         }
+                        remember()
                         change.consume()
                     }
                 }

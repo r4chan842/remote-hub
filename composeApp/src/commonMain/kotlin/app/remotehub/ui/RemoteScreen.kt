@@ -70,11 +70,13 @@ fun RemoteContent(
     onKeyboard: () -> Unit,
     onClipboard: () -> Unit,
     onCtrlAltDel: () -> Unit,
+    onRightClick: () -> Unit,
     onToggleInputMode: () -> Unit,
     onFullscreen: () -> Unit,
     modifier: Modifier = Modifier,
     fullscreen: Boolean = false,
     connecting: Boolean = false,
+    rightClickArmed: Boolean = false,
     hostAspectRatio: Float = 16f / 9f,
     desktopSurface: (@Composable () -> Unit)? = null,
 ) {
@@ -189,23 +191,44 @@ fun RemoteContent(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             Surface(color = Chrome.copy(alpha = 0.96f), shape = CornerRadius.barTop, contentColor = ChromeText) {
-                Row(
+                // Two rows of three. Six tools in one row squeezed every label to
+                // ~100px on a phone and truncated "Ctrl+Alt+Del".
+                Column(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    RemoteTool(Symbols.keyboard, s.keyboard, onKeyboard, Modifier.weight(1f), ExpressiveShapes.cookie6)
-                    RemoteTool(Symbols.contentCopy, s.clipboard, onClipboard, Modifier.weight(1f), ExpressiveShapes.clover4)
-                    RemoteTool(Symbols.cable, s.ctrlAltDel, onCtrlAltDel, Modifier.weight(1f), ExpressiveShapes.gem)
-                    RemoteTool(
-                        if (metrics.trackpadMode) Symbols.mouse else Symbols.touchApp,
-                        if (metrics.trackpadMode) s.trackpadMode else s.touchMode,
-                        onToggleInputMode,
-                        Modifier.weight(1f),
-                        ExpressiveShapes.sunny,
-                        active = metrics.trackpadMode,
-                    )
-                    RemoteTool(Symbols.fullscreen, s.fullscreen, onFullscreen, Modifier.weight(1f), ExpressiveShapes.pentagon)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RemoteTool(Symbols.keyboard, s.keyboard, onKeyboard, Modifier.weight(1f), ExpressiveShapes.cookie6)
+                        RemoteTool(
+                            Symbols.rightClick,
+                            s.rightClick,
+                            onRightClick,
+                            Modifier.weight(1f),
+                            ExpressiveShapes.diamond,
+                            active = rightClickArmed,
+                        )
+                        RemoteTool(Symbols.contentCopy, s.clipboard, onClipboard, Modifier.weight(1f), ExpressiveShapes.clover4)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RemoteTool(Symbols.cable, s.ctrlAltDel, onCtrlAltDel, Modifier.weight(1f), ExpressiveShapes.gem)
+                        RemoteTool(
+                            if (metrics.trackpadMode) Symbols.mouse else Symbols.touchApp,
+                            if (metrics.trackpadMode) s.trackpadMode else s.touchMode,
+                            onToggleInputMode,
+                            Modifier.weight(1f),
+                            ExpressiveShapes.sunny,
+                            active = metrics.trackpadMode,
+                        )
+                        RemoteTool(Symbols.fullscreen, s.fullscreen, onFullscreen, Modifier.weight(1f), ExpressiveShapes.pentagon)
+                    }
                 }
             }
         }

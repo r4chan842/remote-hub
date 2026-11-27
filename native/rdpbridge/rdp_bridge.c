@@ -901,8 +901,11 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeConnect(
 	freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, gfx ? TRUE : FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_GfxH264, h264 ? TRUE : FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_GfxAVC444, h264 ? TRUE : FALSE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, FALSE);
-	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, FALSE);
+	/* Progressive refinement is designed for high-latency links: the host sends a
+	 * coarse pass immediately and sharpens it, so a click feels answered even when
+	 * the round trip is 300ms. */
+	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressive, TRUE);
+	freerdp_settings_set_bool(settings, FreeRDP_GfxProgressiveV2, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_GfxPlanar, TRUE);
 	/* THINCLIENT advertises an H.264-only thin client and SMALL_CACHE shrinks the
 	 * surface cache to 20 MB. Neither is needed here, and both push Windows towards
@@ -942,6 +945,15 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeConnect(
 	freerdp_settings_set_bool(settings, FreeRDP_DisableCursorBlinking, TRUE);
 	freerdp_settings_set_bool(settings, FreeRDP_AllowDesktopComposition, FALSE);
 	freerdp_settings_set_bool(settings, FreeRDP_AllowFontSmoothing, quality >= 2 ? TRUE : FALSE);
+	/* Every one of these removes drawing the phone would have to download and
+	 * blit for no benefit on a 6-inch screen. */
+	freerdp_settings_set_bool(settings, FreeRDP_DisableCursorShadow, TRUE);
+	freerdp_settings_set_bool(settings, FreeRDP_DisableCursorBlinking, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_AllowDesktopComposition, FALSE);
+	freerdp_settings_set_bool(settings, FreeRDP_RemoteFxImageCodec, TRUE);
+	/* Advertise a large multifragment budget so a graphics frame arrives in fewer
+	 * virtual-channel fragments instead of many round-trippable pieces. */
+	freerdp_settings_set_uint32(settings, FreeRDP_MultifragMaxRequestSize, 0xFFFF);
 	freerdp_settings_set_bool(settings, FreeRDP_CompressionEnabled, TRUE);
 	freerdp_settings_set_uint32(settings, FreeRDP_CompressionLevel, 2);
 	freerdp_settings_set_uint32(settings, FreeRDP_MultifragMaxRequestSize, 0xFFFF);
@@ -1015,6 +1027,20 @@ JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeAllocFrame(JNI
 	pthread_mutex_unlock(&rh->lock);
 	atomic_store(&rh->dirty, 1);
 	return JNI_TRUE;
+}
+
+/* The host must announce INPUT_FLAG_UNICODE; capabilities.c overwrites the
+ * client's request with the server flag. Kotlin falls back to US-layout
+ * scancodes when this is false, so typing works either way. */
+JNIEXPORT jboolean JNICALL Java_app_remotehub_rdp_NativeRdp_nativeSupportsUnicode(JNIEnv* env,
+                                                                                jclass cls,
+                                                                                jlong handle)
+{
+	rhContext* rh = (rhContext*)(intptr_t)handle;
+	if (!rh)
+		return JNI_FALSE;
+	return freerdp_settings_get_bool(rh->common.context.settings, FreeRDP_UnicodeInput) ? JNI_TRUE
+	                                                                                   : JNI_FALSE;
 }
 
 /* { roundTripMillis, bytesIn, bytesOut } straight from the engine. The RTT is

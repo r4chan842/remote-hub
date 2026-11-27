@@ -258,6 +258,7 @@ class AppStrings(
     val keyboard: String = values.getValue("keyboard")
     val clipboard: String = values.getValue("clipboard")
     val ctrlAltDel: String = values.getValue("ctrlAltDel")
+    val rightClick: String = values.getValue("rightClick")
     val fullscreen: String = values.getValue("fullscreen")
     val touchMode: String = values.getValue("touchMode")
     val trackpadMode: String = values.getValue("trackpadMode")
@@ -418,7 +419,7 @@ val requiredKeys: List<String> = listOf(
     "cores", "memory", "disk", "operatingSystem", "backups", "createBackup",
     "restore", "encrypted", "history", "workflowRun", "openInGithub", "repository",
     "lastError", "remoteTitle", "connectedTo", "bandwidth", "keyboard", "clipboard",
-    "ctrlAltDel", "fullscreen", "touchMode", "trackpadMode", "quality", "disconnectSession",
+    "ctrlAltDel", "rightClick", "fullscreen", "touchMode", "trackpadMode", "quality", "disconnectSession",
     "nativeEngine", "secureChannel", "settingsTitle", "appearance", "theme", "themeSystem",
     "themeLight", "themeDark", "languageLabel", "notifications", "expiryAlert", "alertThreshold",
     "security", "biometricLock", "clearCredentials", "storageEncryption", "guides", "gettingStarted",
@@ -795,6 +796,8 @@ val Persian = AppStrings("fa", true, mapOf(
     "keyboard" to "کیبورد",
     "clipboard" to "کلیپ‌بورد",
     "ctrlAltDel" to "Ctrl+Alt+Del",
+    "rightClick" to "Right click",
+    "rightClick" to "راست‌کلیک",
     "fullscreen" to "تمام‌صفحه",
     "touchMode" to "لمس مستقیم",
     "trackpadMode" to "ترک‌پد",
@@ -1515,6 +1518,7 @@ val Arabic = AppStrings("ar", true, mapOf(
     "keyboard" to "لوحة المفاتيح",
     "clipboard" to "الحافظة",
     "ctrlAltDel" to "Ctrl+Alt+Del",
+    "rightClick" to "نقر يمين",
     "fullscreen" to "ملء الشاشة",
     "touchMode" to "لمس مباشر",
     "trackpadMode" to "لوحة تتبع",

@@ -182,7 +182,11 @@ class RdpSession(
             colorDepth = 24,
             nla = true,
             graphicsPipeline = graphicsPipeline,
-            h264 = false,
+            // The engine is built with WITH_OPENH264=ON. Leaving this false made
+            // Windows send RemoteFX/uncompressed surfaces, which on a DERP relay
+            // capped the session at 4-10 fps. AVC444 keeps text sharp and costs a
+            // fraction of the bandwidth.
+            h264 = true,
             clipboard = true,
             audio = false,
             pinnedFingerprint = pinned,
@@ -450,8 +454,52 @@ class RdpSession(
 
     fun sendSync(flags: Int) = runCatching { NativeRdp.sync(handle, flags) }.isSuccess
 
-    fun sendText(text: String) {
-        text.forEach { code -> runCatching { NativeRdp.unicode(handle, code.code) } }
+    /** Where the finger last was, in host pixels. The right-click tool uses it. */
+    @Volatile var pointerHostX: Int = 0
+    @Volatile var pointerHostY: Int = 0
+
+    fun rememberPointer(x: Int, y: Int) {
+        pointerHostX = x
+        pointerHostY = y
+    }
+
+    /** Right click at the remembered position (direct touch has no visible cursor). */
+    fun rightClickAtPointer() = sendRightClick(pointerHostX, pointerHostY)
+
+    /**
+     * Unicode input is the only way to type Persian, Arabic or emoji without the
+     * host having that keyboard layout installed. capabilities.c overwrites the
+     * client request with the server's INPUT_FLAG_UNICODE, so check it and fall
+     * back to US-layout scancodes when the host declined.
+     */
+    fun typeText(text: String) {
+        if (text.isEmpty()) return
+        if (NativeRdp.supportsUnicode(handle)) {
+            // Kotlin chars are UTF-16 units, which is exactly what the Unicode PDU
+            // carries, so surrogate pairs go out as two events.
+            text.forEach { unit -> runCatching { NativeRdp.unicode(handle, unit.code) } }
+            return
+        }
+        text.forEach { ch ->
+            val mapped = RdpKeys.forChar(ch)
+            if (mapped == null) {
+                Diagnostics.warn("rdp", "host has no Unicode input; cannot type U+${ch.code.toString(16)}")
+            } else {
+                val (scan, shift) = mapped
+                if (shift) runCatching { NativeRdp.key(handle, RdpKeys.LSHIFT, true) }
+                runCatching { NativeRdp.key(handle, scan, true) }
+                runCatching { NativeRdp.key(handle, scan, false) }
+                if (shift) runCatching { NativeRdp.key(handle, RdpKeys.LSHIFT, false) }
+            }
+        }
+    }
+
+    fun sendText(text: String) = typeText(text)
+
+    /** Press and release one scancode. */
+    fun tapKey(scancode: Int) {
+        runCatching { NativeRdp.key(handle, scancode, true) }
+        runCatching { NativeRdp.key(handle, scancode, false) }
     }
 
     fun sendCtrlAltDel() = runCatching {

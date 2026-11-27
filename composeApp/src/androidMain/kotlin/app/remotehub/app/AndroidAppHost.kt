@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -42,6 +43,7 @@ import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
 import app.remotehub.i18n.LocalStrings
 import app.remotehub.i18n.stringsFor
+import app.remotehub.rdp.RdpKeyboardTarget
 import app.remotehub.rdp.RdpSurface
 import app.remotehub.ui.AppShell
 import app.remotehub.ui.BackIcon
@@ -222,10 +224,12 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             onKeyboard = { controller.showKeyboard() },
                             onClipboard = { controller.pushClipboard(active.id) },
                             onCtrlAltDel = { controller.sendCtrlAltDel(active.id) },
+                            onRightClick = { controller.rightClickRemote(active.id) },
                             onToggleInputMode = { controller.toggleInputMode() },
                             onFullscreen = { controller.toggleRemoteFullscreen() },
                             fullscreen = state.remoteFullscreen,
                             connecting = state.remoteConnecting,
+                            rightClickArmed = state.rightClickArmed,
                             hostAspectRatio = controller.remoteAspectRatio(active.id),
                             desktopSurface = {
                                 if (active.connection?.address.isNullOrBlank()) {
@@ -234,9 +238,22 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                                     RdpSurface(
                                         session = controller.rdpSession(active.id),
                                         trackpadMode = state.trackpadMode,
+                                        rightClickArmed = state.rightClickArmed,
+                                        onRightClickConsumed = { controller.consumeRightClick() },
                                     )
                                 }
                             },
+                        )
+                        // The IME needs a focused editor to deliver keystrokes into.
+                        // It stays composed for the whole session so focus survives
+                        // toggling, and it is 1dp so it never covers the desktop.
+                        RdpKeyboardTarget(
+                            visible = state.keyboardVisible,
+                            onText = { controller.typeRemote(active.id, it) },
+                            onScancode = { code, down -> controller.remoteKey(active.id, code, down) },
+                            onPaste = { controller.pushClipboard(active.id) },
+                            onImeVisibility = { controller.onImeVisibility(it) },
+                            modifier = Modifier.align(Alignment.BottomStart).size(1.dp),
                         )
                         if (state.error != null) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -274,7 +291,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                     AppScreen.Create -> { { BackIcon(onClick = { controller.goSetup() }) } }
                     AppScreen.Progress -> { { BackIcon(onClick = { controller.cancelProvision() }) } }
                     AppScreen.Detail -> { { BackIcon(onClick = { controller.goServers() }) } }
-                    AppScreen.Settings -> { { BackIcon(onClick = { controller.goSetup() }) } }
+                    AppScreen.Settings -> { { BackIcon(onClick = { controller.leaveSettings() }) } }
                     AppScreen.Guide -> { { BackIcon(onClick = { controller.closeGuide() }) } }
                     AppScreen.Logs -> { { BackIcon(onClick = { controller.closeLogs() }) } }
                     else -> null
@@ -283,7 +300,7 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                 when (state.screen) {
                     AppScreen.Create -> BackHandler { controller.goSetup() }
                     AppScreen.Detail -> BackHandler { controller.goServers() }
-                    AppScreen.Settings -> BackHandler { controller.goSetup() }
+                    AppScreen.Settings -> BackHandler { controller.leaveSettings() }
                     AppScreen.Servers, AppScreen.Network -> BackHandler { controller.goSetup() }
                     AppScreen.Guide -> BackHandler { controller.closeGuide() }
                     AppScreen.Logs -> BackHandler { controller.closeLogs() }

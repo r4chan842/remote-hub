@@ -169,6 +169,7 @@ fun RemoteHubApp() {
                             onDisconnect = { screen = AppScreen.Detail },
                             onKeyboard = {},
                             onClipboard = {},
+                            onRightClick = {},
                             onCtrlAltDel = {},
                             onToggleInputMode = {},
                             onFullscreen = { screen = AppScreen.Detail },

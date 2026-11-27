@@ -13,11 +13,11 @@
 package tsbridge
 
 import (
-	"github.com/tailscale/wireguard-go/tun"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tailscale/wireguard-go/tun"
 	"io"
 	"net"
 	"os"
@@ -616,6 +616,13 @@ func StateDir(base, name string) string {
 }
 
 func pipe(ctx context.Context, a, b net.Conn) {
+	// RDP input PDUs are ~20 bytes. With Nagle on, each hop waits for a coalescing
+	// timer before forwarding, which shows up as rubber-bandy mouse movement.
+	for _, c := range []net.Conn{a, b} {
+		if tc, ok := c.(*net.TCPConn); ok {
+			_ = tc.SetNoDelay(true)
+		}
+	}
 	done := make(chan struct{}, 2)
 	goSafe("pipe-a", func() { io.Copy(a, b); done <- struct{}{} })
 	goSafe("pipe-b", func() { io.Copy(b, a); done <- struct{}{} })

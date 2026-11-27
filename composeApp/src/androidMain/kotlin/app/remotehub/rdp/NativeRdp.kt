@@ -150,6 +150,10 @@ object NativeRdp {
         if (available && handle != 0L) runCatching { nativeNetStats(handle) }.getOrDefault(LongArray(3))
         else LongArray(3)
 
+    /** Whether the host negotiated Unicode input (INPUT_FLAG_UNICODE). */
+    fun supportsUnicode(handle: Long): Boolean =
+        available && handle != 0L && runCatching { nativeSupportsUnicode(handle) }.getOrDefault(false)
+
     fun frames(handle: Long): Long = if (available && handle != 0L) nativeFrames(handle) else 0L
     fun width(handle: Long): Int = if (available && handle != 0L) nativeWidth(handle) else 0
     fun height(handle: Long): Int = if (available && handle != 0L) nativeHeight(handle) else 0
@@ -196,6 +200,7 @@ object NativeRdp {
     @JvmStatic private external fun nativeSync(handle: Long, flags: Int)
     @JvmStatic private external fun nativeResize(handle: Long, width: Int, height: Int): Boolean
     @JvmStatic private external fun nativeSendClipboard(handle: Long, text: String): Boolean
+    @JvmStatic private external fun nativeSupportsUnicode(handle: Long): Boolean
     @JvmStatic private external fun nativeNetStats(handle: Long): LongArray
     @JvmStatic private external fun nativeFrames(handle: Long): Long
     @JvmStatic private external fun nativeWidth(handle: Long): Int
