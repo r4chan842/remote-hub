@@ -254,16 +254,14 @@ class ProvisionerTest {
             if (path.endsWith("/dispatches")) {
                 dispatchAttempts++
                 if (dispatchAttempts == 1) {
-                    respond(
+                    return@MockEngine respond(
                         ByteReadChannel("""{"message":"Workflow does not have workflow_dispatch trigger"}"""),
                         HttpStatusCode.UnprocessableEntity,
                         headersOf(HttpHeaders.ContentType, "application/json"),
                     )
-                    return@MockEngine
                 }
                 dispatched = true
-                respond(ByteReadChannel(""), HttpStatusCode.NoContent, headersOf(HttpHeaders.ContentType, "application/json"))
-                return@MockEngine
+                return@MockEngine respond(ByteReadChannel(""), HttpStatusCode.NoContent, headersOf(HttpHeaders.ContentType, "application/json"))
             }
             val body = when {
                 path == "/user" -> """{"login":"owner"}"""
