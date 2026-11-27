@@ -59,6 +59,11 @@ kotlin {
     }
 }
 
+val releaseAbis = listOf("arm64-v8a", "armeabi-v7a")
+// versionCode = base * 10 + ABI digit, so every split APK has its own code and
+// arm64 wins over armv7 on devices that support both. Universal keeps digit 0.
+val abiVersionDigit = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2)
+
 android {
     namespace = "app.remotehub"
     compileSdk = 35
@@ -69,7 +74,31 @@ android {
         targetSdk = 35
         versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("appVersionName") as String?) ?: "0.1.0"
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        // ABI selection lives in `splits.abi` below (AGP rejects ndk.abiFilters together
+        // with ABI splits). Other ABIs coming from dependencies are dropped in `packaging`.
+    }
+
+    // One APK per ABI halves the download for every user; the universal APK stays
+    // available as a fallback (-PuniversalApk=false skips it).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include(*releaseAbis.toTypedArray())
+            isUniversalApk = (project.findProperty("universalApk") as String?)?.toBoolean() ?: true
+        }
+    }
+
+    // Google Play dependency metadata is useless for GitHub-distributed APKs.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
+    lint {
+        checkReleaseBuilds = true
+        abortOnError = true
+        warningsAsErrors = false
     }
 
     signingConfigs {
@@ -110,8 +139,33 @@ android {
     }
 
     packaging {
-        jniLibs.useLegacyPackaging = false
+        // Native libraries stay STORED (uncompressed) and 16 KB zip-aligned so the
+        // loader maps them straight from the APK on 4 KB and 16 KB page devices;
+        // nothing is extracted to /data at install time.
+        // Compressed native libraries: the per-ABI download drops from ~37 MB to ~16 MB.
+        // They are extracted once at install time, which every Android version supports.
+        jniLibs.useLegacyPackaging = true
+        jniLibs.excludes += setOf(
+            "lib/x86/**",
+            "lib/x86_64/**",
+            "lib/armeabi/**",
+            "lib/mips/**",
+            "lib/mips64/**",
+            "lib/riscv64/**",
+        )
+        // JNA's jar carries desktop dispatch libraries (AIX, macOS, Windows, BSD, Linux,
+        // Solaris) that Android can never load. Android-specific JNA natives, if any
+        // dependency brings them, are not touched.
         resources.excludes += setOf(
+            "com/sun/jna/aix-*/**",
+            "com/sun/jna/darwin*/**",
+            "com/sun/jna/win32-*/**",
+            "com/sun/jna/sunos-*/**",
+            "com/sun/jna/freebsd-*/**",
+            "com/sun/jna/openbsd-*/**",
+            "com/sun/jna/dragonflybsd-*/**",
+            "com/sun/jna/linux-*/**",
+
             "/META-INF/{AL2.0,LGPL2.1}",
             "META-INF/DEPENDENCIES",
             "META-INF/INDEX.LIST",
@@ -119,6 +173,18 @@ android {
     }
 
     buildFeatures { buildConfig = true }
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters
+                .find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                ?.identifier
+            val base = output.versionCode.orNull ?: 1
+            output.versionCode.set(base * 10 + (abiVersionDigit[abi] ?: 0))
+        }
+    }
 }
 
 compose.resources {

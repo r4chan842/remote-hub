@@ -198,4 +198,32 @@ class GitHubClientTest {
         assertEquals("expired_token", result.reason)
         flow.close()
     }
+
+    @Test
+    fun deviceCodeIsSentFormEncoded() = runTest {
+        var sentType: String? = null
+        var sentBody = ""
+        val engine = MockEngine { req ->
+            sentType = req.body.contentType?.toString()
+            sentBody = (req.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().decodeToString()
+            respond(
+                ByteReadChannel("""{"device_code":"d","user_code":"AB-CD","verification_uri":"https://github.com/login/device","expires_in":900,"interval":5}"""),
+                HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val flow = DeviceFlowClient("Ov23abc", engine)
+        flow.requestCode()
+        assertTrue(sentType!!.startsWith("application/x-www-form-urlencoded"))
+        assertTrue(sentBody.contains("client_id=Ov23abc"))
+        flow.close()
+    }
+
+    @Test
+    fun deviceFlowDisabledIsReported() = runTest {
+        val flow = DeviceFlowClient("client", jsonEngine(body = """{"error":"device_flow_disabled"}"""))
+        val error = assertFailsWith<GitHubException> { flow.requestCode() }
+        assertEquals("device_flow_disabled", error.message)
+        flow.close()
+    }
 }

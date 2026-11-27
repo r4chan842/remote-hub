@@ -127,7 +127,10 @@ class AndroidAppHost(private val activity: ComponentActivity) {
     fun startDeviceFlow() {
         val clientId = state.clientIdInput.trim()
         if (clientId.isBlank()) {
+            // Without a Client ID GitHub cannot issue a device code. Take the user to the
+            // official page where the OAuth App is created instead of silently doing nothing.
             state = state.copy(error = stringsFor(state.localeTag).oauthClientIdHint)
+            handleEffect(SideEffect.OpenUrl("https://github.com/settings/applications/new"))
             return
         }
         scope.launch {
@@ -147,12 +150,22 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                         ),
                     )
                     handleEffect(SideEffect.Copy("user code", code.userCode))
-                    pollDeviceFlow(client, code)
+                    handleEffect(SideEffect.OpenUrl(code.verificationUri))
+                    runCatching { pollDeviceFlow(client, code) }
+                        .onFailure { e -> state = state.copy(error = deviceFlowError(e)) }
                 }
                 .onFailure { error ->
-                    state = state.copy(busy = false, error = error.message ?: "device flow failed")
+                    state = state.copy(busy = false, error = deviceFlowError(error))
                 }
         }
+    }
+
+    private fun deviceFlowError(error: Throwable): String = when {
+        error is app.remotehub.github.GitHubException && (error.status == 404 || error.status == 401) ->
+            "Client ID is invalid, or Device Flow is not enabled for this OAuth App."
+        error.message?.contains("device_flow_disabled") == true ->
+            "Enable \"Device Flow\" in the OAuth App settings on GitHub."
+        else -> error.message ?: "Could not reach GitHub. Check the connection and try again."
     }
 
     private suspend fun pollDeviceFlow(client: DeviceFlowClient, code: app.remotehub.github.DeviceCodeResponse) {
@@ -288,6 +301,8 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             },
                             onDisconnect = { controller.disconnectGitHub() },
                             modifier = contentModifier,
+                            error = state.error,
+                            busy = state.busy,
                         )
                         state.guideId != null -> SettingsGuides(
                             guideId = state.guideId!!,
