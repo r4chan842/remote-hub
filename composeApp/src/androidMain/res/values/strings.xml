@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RemoteHub</string>
+    <string name="session_channel">Remote session</string>
+    <string name="session_running">Remote session active</string>
+    <string name="expiry_title">Session ending soon</string>
+</resources>

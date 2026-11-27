@@ -51,6 +51,7 @@ fun RemoteContent(
     onToggleInputMode: () -> Unit,
     onFullscreen: () -> Unit,
     modifier: Modifier = Modifier,
+    desktopSurface: (@Composable () -> Unit)? = null,
 ) {
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
@@ -96,6 +97,9 @@ fun RemoteContent(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
+                if (desktopSurface != null) {
+                    desktopSurface()
+                } else {
                 Box(contentAlignment = Alignment.Center) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -143,6 +147,7 @@ fun RemoteContent(
                             }
                         }
                     }
+                }
                 }
             }
         }

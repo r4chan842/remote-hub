@@ -10,6 +10,8 @@ activityCompose = "1.9.3"
 lazysodiumJava = "5.1.4"
 lazysodiumAndroid = "5.1.0"
 jna = "5.17.0"
+coreKtx = "1.15.0"
+biometric = "1.1.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -28,6 +30,8 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 lazysodium-java = { module = "com.goterl:lazysodium-java", version.ref = "lazysodiumJava" }
 lazysodium-android = { module = "com.goterl:lazysodium-android", version.ref = "lazysodiumAndroid" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

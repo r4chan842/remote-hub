@@ -143,6 +143,9 @@ data class ServerSession(
     val operations: List<OperationRecord>,
     val backups: List<BackupRecord>,
     val lastError: String?,
+    val runId: Long = 0,
+    val startedAtEpochMs: Long = 0,
+    val durationMinutes: Int = 120,
 )
 
 data class QuotaSnapshot(
