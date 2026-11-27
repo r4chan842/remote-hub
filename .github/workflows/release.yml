@@ -69,17 +69,7 @@ jobs:
             sleep 20
             if [ "$attempt" = "3" ]; then exit 1; fi
           done
-          python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET
-          total = failures = errors = 0
-          for path in glob.glob("composeApp/build/test-results/**/*.xml", recursive=True):
-              root = ET.parse(path).getroot()
-              total += int(root.get("tests", 0))
-              failures += int(root.get("failures", 0))
-              errors += int(root.get("errors", 0))
-          print(f"tests={total} failures={failures} errors={errors}")
-          assert total > 0 and failures == 0 and errors == 0
-          PY
+          python3 scripts/test-summary.py
 
       - name: Prepare signing key
         env:
@@ -120,57 +110,9 @@ jobs:
           echo "dir=release" >> "$GITHUB_OUTPUT"
 
       - name: Write release notes
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import glob, os, xml.etree.ElementTree as ET
-          total = 0
-          for path in glob.glob("composeApp/build/test-results/**/*.xml", recursive=True):
-              total += int(ET.parse(path).getroot().get("tests", 0))
-          apk = glob.glob("release/*.apk")[0]
-          size_mb = os.path.getsize(apk) / (1024 * 1024)
-          notes = f"""## RemoteHub {os.environ['TAG']}
-
-Android-only release. Windows is out of scope for this version.
-
-### What is inside
-
-- Native Kotlin + Compose Material 3 interface, Persian / English / Arabic, dark and light.
-- GitHub sign-in through the official Device Authorization Flow or a personal access token, with scope validation.
-- Tailscale compiled into the app with `tsnet` in userspace mode: no root, no separate client, coexists with an active system VPN.
-- Remote desktop rendered by FreeRDP 3.33.1 through a JNI bridge with software GDI, graphics pipeline, RemoteFX, NSCodec and OpenH264.
-- Repository, sealed secrets, workflow dispatch and live step status driven by the real GitHub API.
-- Server lifecycle, operation history, re-run, expiry warnings and client-side encrypted backups in your own repository.
-
-### Verified in this build
-
-- {total} automated tests executed on GitHub Actions, zero failures.
-- APK signed and verified with `apksigner`.
-- Native libraries present for `arm64-v8a` and `armeabi-v7a`.
-- Uncompressed APK size: {size_mb:.1f} MB.
-
-### Compliance
-
-GitHub Actions is used only for build, test, release and short orchestration. Each orchestration job is capped at 20 minutes. The remote desktop runs on a machine in your own cloud account, never on a GitHub-hosted runner.
-
-### Install
-
-Download the APK below and allow installation from your browser or file manager. Verify the download with `SHA256SUMS.txt`.
-
-### First run
-
-1. Settings → connect GitHub.
-2. Network → paste a Tailscale auth key.
-3. Settings → add your cloud provider token.
-4. Dashboard → New server.
-
-Full guides in three languages are built into Settings → Guides.
-"""
-          open("release/NOTES.md", "w").write(notes)
-          print(notes)
-          PY
         env:
           TAG: ${{ steps.version.outputs.tag }}
+        run: python3 scripts/release-notes.py
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65

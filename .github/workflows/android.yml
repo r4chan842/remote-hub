@@ -63,24 +63,7 @@ jobs:
 
       - name: Publish test summary
         if: always()
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET
-          total = failures = errors = skipped = 0
-          files = glob.glob("composeApp/build/test-results/**/*.xml", recursive=True)
-          for path in files:
-              root = ET.parse(path).getroot()
-              total += int(root.get("tests", 0))
-              failures += int(root.get("failures", 0))
-              errors += int(root.get("errors", 0))
-              skipped += int(root.get("skipped", 0))
-          print(f"suites={len(files)} tests={total} failures={failures} errors={errors} skipped={skipped}")
-          if total == 0:
-              raise SystemExit("no tests were executed")
-          if failures or errors:
-              raise SystemExit("test failures present")
-          PY
+        run: python3 scripts/test-summary.py
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
