@@ -23,7 +23,7 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.components.resources)
         }
-        desktopMain.dependencies {
+        getByName("desktopMain").dependencies {
             implementation(compose.desktop.currentOs)
             implementation(libs.kotlinx.coroutines.swing)
         }
