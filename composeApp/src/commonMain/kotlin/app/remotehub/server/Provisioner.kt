@@ -17,6 +17,7 @@ data class ProvisionRequest(
     val repositoryName: String,
     val tailscaleAuthKey: String,
     val providerToken: String,
+    val tailscaleApiToken: String = "",
     val durationMinutes: Int,
     val warningMinutes: Int,
     val desktopWidth: Int,
@@ -110,6 +111,7 @@ class Provisioner(
             val username = "rhuser"
             val publicKey = client.publicKey(owner, request.repositoryName)
             val secrets = linkedMapOf(
+                "PROVIDER_TOKEN" to request.providerToken,
                 "TS_AUTHKEY" to request.tailscaleAuthKey,
                 "RDP_USERNAME" to username,
                 "RDP_PASSWORD" to password,
@@ -120,7 +122,7 @@ class Provisioner(
                 "SESSION_SIZE" to request.machineSize,
                 "SESSION_IMAGE" to request.osImage,
             )
-            if (request.providerToken.isNotBlank()) {
+            if (request.tailscaleApiToken.isNotBlank()) {
                 secrets["TS_API_TOKEN"] = request.tailscaleApiToken
             }
             secrets.forEach { (name, value) ->

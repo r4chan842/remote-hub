@@ -3,9 +3,12 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
 
 plugins {
+    // AGP must be applied before the Kotlin Multiplatform plugin: the KMP plugin
+    // registers the Android resource publication action as soon as it is applied
+    // and queries AndroidGradlePluginVersion.getCurrent() at that moment.
+    alias(libs.plugins.androidApplication)
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
 }
@@ -53,10 +56,6 @@ kotlin {
             implementation(libs.ktor.client.mock)
             implementation(libs.kotlinx.coroutines.test)
         }
-        getByName("desktopTest").dependencies {
-            implementation(libs.lazysodium.java)
-            implementation(libs.jna)
-        }
     }
 }
 
@@ -69,7 +68,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
-        versionName = (project.findProperty("appVersionName") as String?) ?: "1.0.0"
+        versionName = (project.findProperty("appVersionName") as String?) ?: "0.1.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 

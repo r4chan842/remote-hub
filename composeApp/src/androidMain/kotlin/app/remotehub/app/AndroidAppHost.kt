@@ -125,8 +125,14 @@ class AndroidAppHost(private val activity: ComponentActivity) {
     }
 
     fun startDeviceFlow() {
+        val clientId = state.clientIdInput.trim()
+        if (clientId.isBlank()) {
+            state = state.copy(error = stringsFor(state.localeTag).oauthClientIdHint)
+            return
+        }
         scope.launch {
-            val client = deviceFlowClient ?: DeviceFlowClient(GITHUB_CLIENT_ID).also { deviceFlowClient = it }
+            deviceFlowClient?.close()
+            val client = DeviceFlowClient(clientId).also { deviceFlowClient = it }
             state = state.copy(busy = true, error = null)
             runCatching { client.requestCode() }
                 .onSuccess { code ->
@@ -264,6 +270,11 @@ class AndroidAppHost(private val activity: ComponentActivity) {
                             method = state.authMethod,
                             deviceFlow = state.deviceFlow,
                             patInput = state.patInput,
+                            clientIdInput = state.clientIdInput,
+                            onClientIdChange = {
+                                state = state.copy(clientIdInput = it)
+                                store.put(StoreKeys.GITHUB_CLIENT_ID, it.trim())
+                            },
                             requiredScopes = GitHubClient.REQUIRED_SCOPES,
                             onMethodChange = { state = state.copy(authMethod = it) },
                             onPatChange = { state = state.copy(patInput = it) },
@@ -394,7 +405,4 @@ class AndroidAppHost(private val activity: ComponentActivity) {
         }
     }
 
-    companion object {
-        const val GITHUB_CLIENT_ID = "Ov23liRhRemoteHub"
-    }
 }

@@ -22,6 +22,7 @@ data class AppState(
     val localeTag: String = "fa",
     val authMethod: AuthMethod = AuthMethod.DeviceFlow,
     val patInput: String = "",
+    val clientIdInput: String = "",
     val authKeyInput: String = "",
     val providerTokenInput: String = "",
     val account: GitHubAccount? = null,

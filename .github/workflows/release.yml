@@ -35,7 +35,7 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
           fi
           VERSION="${TAG#v}"
-          CODE="$(date -u +%y%m%d)"
+          CODE="$(date -u +%y%m%d%H)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"

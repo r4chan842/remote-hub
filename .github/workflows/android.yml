@@ -12,6 +12,9 @@ on:
       - settings.gradle.kts
       - gradle.properties
       - .github/workflows/android.yml
+  workflow_run:
+    workflows: [Native Engines]
+    types: [completed]
 
 permissions:
   contents: read

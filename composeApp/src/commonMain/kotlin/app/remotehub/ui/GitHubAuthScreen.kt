@@ -48,6 +48,8 @@ fun GitHubAuthContent(
     method: AuthMethod,
     deviceFlow: DeviceFlowState,
     patInput: String,
+    clientIdInput: String,
+    onClientIdChange: (String) -> Unit,
     requiredScopes: List<String>,
     onMethodChange: (AuthMethod) -> Unit,
     onPatChange: (String) -> Unit,
@@ -115,6 +117,17 @@ fun GitHubAuthContent(
                     TagChip(s.recommended, tone = scheme.primaryContainer, content = scheme.onPrimaryContainer)
                 }
                 Text(s.deviceInstruction, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
+
+                OutlinedTextField(
+                    value = clientIdInput,
+                    onValueChange = onClientIdChange,
+                    label = { Text(s.oauthClientId) },
+                    placeholder = { Text("Iv1.xxxxxxxxxxxxxxxx") },
+                    singleLine = true,
+                    supportingText = { Text(s.oauthClientIdHint, style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    shape = MaterialTheme.shapes.medium,
+                )
 
                 Surface(
                     color = scheme.surfaceContainerHighest,

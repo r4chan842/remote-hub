@@ -89,6 +89,7 @@ class SessionController(
             authKeyInput = store.get(StoreKeys.TS_AUTH_KEY) ?: "",
             providerTokenInput = store.get(PROVIDER_TOKEN_KEY) ?: "",
             repositoryName = store.get(REPO_KEY) ?: "remote-hub-sessions",
+            clientIdInput = store.get(StoreKeys.GITHUB_CLIENT_ID) ?: "",
         )
         if (token != null && login != null) {
             github = GitHubClient(token)
@@ -376,6 +377,7 @@ class SessionController(
                         repositoryName = state.repositoryName,
                         tailscaleAuthKey = authKey,
                         providerToken = providerToken,
+                        tailscaleApiToken = store.get(StoreKeys.TS_API_TOKEN) ?: "",
                         durationMinutes = 120,
                         warningMinutes = form.warningMinutes,
                         desktopWidth = 1600,

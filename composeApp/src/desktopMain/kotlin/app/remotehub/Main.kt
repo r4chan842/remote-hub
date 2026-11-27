@@ -140,6 +140,8 @@ fun RemoteHubApp() {
                         method = authMethod,
                         deviceFlow = deviceFlow,
                         patInput = patInput,
+                        clientIdInput = "",
+                        onClientIdChange = {},
                         requiredScopes = listOf("repo", "workflow", "read:user"),
                         onMethodChange = { authMethod = it },
                         onPatChange = { patInput = it },

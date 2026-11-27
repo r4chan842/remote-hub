@@ -124,9 +124,10 @@ class ProvisionerTest {
         assertEquals("rhuser", outcome.username)
         assertEquals(22, outcome.password.length)
         assertTrue(outcome.sessionId.startsWith("dev-box-"))
-        assertEquals(9, box.sealed.size)
+        assertEquals(10, box.sealed.size)
         assertTrue(box.sealed.all { it.second == "aGVsbG8=" })
         assertTrue(seen.any { it == "POST /repos/owner/sessions/actions/variables" })
+        assertTrue(seen.any { it == "PUT /repos/owner/sessions/actions/secrets/PROVIDER_TOKEN" })
         assertTrue(seen.any { it.contains("/dispatches") })
 
         val lastSteps = events.filterIsInstance<ProvisionEvent.Steps>().last().steps

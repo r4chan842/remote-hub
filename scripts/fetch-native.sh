@@ -52,17 +52,29 @@ download() {
 }
 
 download tsbridge-aar composeApp/libs
-test -f composeApp/libs/tsbridge.aar
-
-download rdpbridge-arm64-v8a composeApp/src/androidMain/jniLibs/arm64-v8a
-download rdpbridge-armeabi-v7a composeApp/src/androidMain/jniLibs/armeabi-v7a
-
-test -f composeApp/src/androidMain/jniLibs/arm64-v8a/libremotehub-rdp.so
-test -f composeApp/src/androidMain/jniLibs/armeabi-v7a/libremotehub-rdp.so
-
-if [ -f composeApp/libs/go.sum ]; then
-  cp composeApp/libs/go.sum native/tsbridge/go.sum
-  rm composeApp/libs/go.sum
+# The artifact preserves the producer's relative path, so flatten it.
+AAR="$(find composeApp/libs -name 'tsbridge.aar' | head -1)"
+test -n "$AAR"
+if [ "$AAR" != "composeApp/libs/tsbridge.aar" ]; then
+  mv "$AAR" composeApp/libs/tsbridge.aar
 fi
+GO_SUM="$(find composeApp/libs -name 'go.sum' | head -1)"
+if [ -n "$GO_SUM" ]; then
+  cp "$GO_SUM" native/tsbridge/go.sum
+fi
+find composeApp/libs -mindepth 1 -type d -exec rm -rf {} +
+
+for ABI in arm64-v8a armeabi-v7a; do
+  DEST="composeApp/src/androidMain/jniLibs/${ABI}"
+  download "rdpbridge-${ABI}" "$DEST"
+  while IFS= read -r lib; do
+    base="$(basename "$lib")"
+    if [ "$lib" != "${DEST}/${base}" ]; then
+      mv "$lib" "${DEST}/${base}"
+    fi
+  done < <(find "$DEST" -name '*.so')
+  find "$DEST" -mindepth 1 -type d -exec rm -rf {} +
+  test -f "${DEST}/libremotehub-rdp.so"
+done
 
 du -sh composeApp/libs composeApp/src/androidMain/jniLibs/*
