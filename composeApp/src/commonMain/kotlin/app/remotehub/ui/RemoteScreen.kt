@@ -22,11 +22,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.remotehub.design.CornerRadius
 import app.remotehub.design.ExpressiveShapes
@@ -97,40 +100,6 @@ fun RemoteContent(
             }
         }
 
-        // ------------------------------------------------------------ top chrome
-        AnimatedVisibility(visible = !fullscreen, enter = fadeIn(), exit = fadeOut()) {
-            Surface(color = Chrome.copy(alpha = 0.94f), contentColor = ChromeText) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Surface(
-                        onClick = onDisconnect,
-                        shape = ExpressiveShapes.circle,
-                        color = ChromeHigh,
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Symbol(Symbols.close, size = 18.dp, tint = ChromeText)
-                        }
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(server.name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                        Text(
-                            if (busy) s.remoteConnecting else "${s.connectedTo} ${server.connection?.address ?: "—"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ChromeMuted,
-                            maxLines = 1,
-                        )
-                    }
-                    MetricPill("${metrics.latencyMillis}", "ms", metrics.latencyMillis in 1..220)
-                    MetricPill("${metrics.framesPerSecond}", "fps", metrics.framesPerSecond > 0)
-                    MetricPill("${metrics.kilobitsPerSecond}", "kbps", metrics.kilobitsPerSecond > 0)
-                }
-            }
-        }
-
         // --------------------------------------------------------- login overlay
         if (busy) {
             Box(
@@ -166,6 +135,47 @@ fun RemoteContent(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SoftTag(metrics.resolutionLabel)
                         SoftTag("TLS · NLA")
+                    }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------ top chrome
+        AnimatedVisibility(visible = !fullscreen, enter = fadeIn(), exit = fadeOut()) {
+            Surface(color = Chrome.copy(alpha = 0.94f), contentColor = ChromeText) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Surface(
+                        onClick = onDisconnect,
+                        shape = ExpressiveShapes.circle,
+                        color = ChromeHigh,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Symbol(Symbols.close, size = 18.dp, tint = ChromeText)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(server.name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        Text(
+                            if (busy) s.remoteConnecting else "${s.connectedTo} ${server.connection?.address ?: "—"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ChromeMuted,
+                            maxLines = 1,
+                        )
+                    }
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            MetricPill("${metrics.latencyMillis}", "ms", metrics.latencyMillis in 1..220)
+                            MetricPill("${metrics.framesPerSecond}", "fps", metrics.framesPerSecond > 0)
+                            MetricPill("${metrics.kilobitsPerSecond}", "kbps", metrics.kilobitsPerSecond > 0)
+                        }
                     }
                 }
             }
