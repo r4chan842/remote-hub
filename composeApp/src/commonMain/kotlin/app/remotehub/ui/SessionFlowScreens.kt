@@ -3,6 +3,8 @@
 package app.remotehub.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +32,7 @@ import app.remotehub.design.ErrorState
 import app.remotehub.design.ExpandableHelp
 import app.remotehub.design.IconSize
 import app.remotehub.design.InlineMessage
+import app.remotehub.design.LoadingState
 import app.remotehub.design.LocalStatusColors
 import app.remotehub.design.MessageTone
 import app.remotehub.design.OutlinedAction
@@ -301,4 +304,12 @@ internal fun stepTitle(id: String, s: AppStrings): String = when (id) {
     "network" -> s.stepJoin
     "ready" -> s.stepReady
     else -> id
+}
+
+/** Shown inside the remote surface while the tailnet address is still being resolved. */
+@Composable
+fun FindingAddressContent(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        LoadingState(LocalStrings.current.findingAddress)
+    }
 }
