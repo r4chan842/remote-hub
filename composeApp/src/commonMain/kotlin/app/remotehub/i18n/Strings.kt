@@ -328,6 +328,7 @@ class AppStrings(
     val logsRdp: String = values.getValue("logsRdp")
     val logsSystem: String = values.getValue("logsSystem")
     val logsCopy: String = values.getValue("logsCopy")
+    val refresh: String = values.getValue("refresh")
     val logsCopied: String = values.getValue("logsCopied")
     val logsClear: String = values.getValue("logsClear")
     val logsCleared: String = values.getValue("logsCleared")
@@ -455,6 +456,7 @@ val requiredKeys: List<String> = listOf(
     "logsTitle", "logsSubtitle", "logsEmpty", "logsEmptyHint", "logsAll",
     "logsErrors", "logsWarnings", "logsNetwork", "logsGithub", "logsRdp",
     "logsSystem", "logsCopy", "logsCopied", "logsClear", "logsCleared",
+    "refresh",
     "logsShare", "logsSearchHint", "logsDetail", "logsEnvironment", "logsCountLabel",
     "viewLogs", "diagnosticsSection", "diagnosticsHint", "lastCrashTitle", "lastCrashHint",
     "logsLiveOn", "logsExpandAll", "errNetlinkTitle", "errNetlinkHint", "errLogDirTitle",
@@ -566,6 +568,7 @@ val Persian = AppStrings("fa", true, mapOf(
     "logsRdp" to "دسکتاپ",
     "logsSystem" to "سیستم",
     "logsCopy" to "کپی لاگ",
+    "refresh" to "بازخوانی",
     "logsCopied" to "لاگ کپی شد",
     "logsClear" to "پاک کردن",
     "logsCleared" to "لاگ پاک شد",
@@ -955,6 +958,7 @@ val English = AppStrings("en", false, mapOf(
     "logsRdp" to "Desktop",
     "logsSystem" to "System",
     "logsCopy" to "Copy log",
+    "refresh" to "Refresh",
     "logsCopied" to "Log copied",
     "logsClear" to "Clear",
     "logsCleared" to "Log cleared",
@@ -1344,6 +1348,7 @@ val Arabic = AppStrings("ar", true, mapOf(
     "logsRdp" to "سطح المكتب",
     "logsSystem" to "النظام",
     "logsCopy" to "نسخ السجل",
+    "refresh" to "تحديث",
     "logsCopied" to "تم نسخ السجل",
     "logsClear" to "مسح",
     "logsCleared" to "تم مسح السجل",

@@ -91,7 +91,7 @@ fun LogsContent(
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            TextAction(s.retry, onRefresh, glyph = Symbols.refresh)
+            TextAction(s.refresh, onRefresh, glyph = Symbols.refresh)
             TextAction(s.logsCopy, onCopy, glyph = Symbols.contentCopy)
         }
 
