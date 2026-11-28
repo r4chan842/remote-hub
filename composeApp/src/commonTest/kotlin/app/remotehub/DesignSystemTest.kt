@@ -138,6 +138,24 @@ class DesignSystemTest {
     }
 
     @Test
+    fun listRowsSitOnTheScreenGrid() {
+        val files = screenSources()
+        if (files.isEmpty()) return
+        val root = sourceRoot() ?: return
+        val all = files + listOf(root.resolve("design/Components.kt"))
+        val offenders = mutableListOf<String>()
+        all.forEach { file ->
+            val text = file.readText()
+            val rows = text.split("ListItem(").size - 1
+            val flush = text.split("flushListRow()").size - 1
+            // Every ListItem must cancel the component's own 16dp inset, otherwise rows
+            // indent past their section header and past the fields beside them.
+            if (rows > flush) offenders += "${file.name}: $rows rows, $flush aligned"
+        }
+        assertTrue(offenders.isEmpty(), "ListItem rows off the grid: ${offenders.joinToString()}")
+    }
+
+    @Test
     fun everyScreenUsesTheSharedScreenContainer() {
         val files = screenSources()
         if (files.isEmpty()) return
