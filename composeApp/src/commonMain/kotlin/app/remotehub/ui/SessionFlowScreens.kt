@@ -239,7 +239,7 @@ fun ProgressContent(
                         title = stepTitle(step.id, s),
                         status = step.status,
                         detail = step.detail,
-                        elapsed = step.elapsedMillis?.let { "${it / 1000}s" },
+                        elapsed = step.elapsedMillis?.let { formatMillis(it) },
                     )
                 }
             }
@@ -312,4 +312,15 @@ fun FindingAddressContent(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         LoadingState(LocalStrings.current.findingAddress)
     }
+}
+
+/** The backend's stage ids, in order. Shared with the tests so the two cannot drift. */
+internal val provisionStepIds = listOf("account", "repo", "secrets", "dispatch", "machine", "network", "ready")
+
+/** Elapsed time as a compact label: seconds under a minute, then minutes and seconds. */
+internal fun formatMillis(millis: Long): String {
+    val total = millis / 1000
+    val minutes = total / 60
+    val seconds = total % 60
+    return if (minutes > 0) "${minutes}m ${seconds}s" else "${seconds}s"
 }
