@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import app.remotehub.design.ConfirmDialog
 import app.remotehub.design.DetailRow
 import app.remotehub.design.DestructiveAction
+import app.remotehub.design.flushListRow
 import app.remotehub.design.IconSize
 import app.remotehub.design.InlineMessage
 import app.remotehub.design.LoadingState
@@ -145,25 +146,24 @@ fun SessionDetailContent(
                 loading = busy && !stopped,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Row(
-                Modifier.fillMaxWidth().padding(top = Spacing.sm),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-            ) {
-                TonalAction(
-                    text = if (stopped) s.rerun else s.restartServer,
-                    onClick = { confirmRerun = true },
-                    glyph = Symbols.restartAlt,
-                    enabled = !busy && !provisioning,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedAction(
-                    text = s.backup,
-                    onClick = onBackup,
-                    glyph = Symbols.backup,
-                    enabled = !busy,
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            // Stacked, not side by side: two half-width buttons ellipsised
+            // "Restart this session" and "Encrypted backup" in English, and the Persian
+            // and Arabic labels are longer still. Material buttons are single-line, so
+            // the fix is to give each one the full measure.
+            TonalAction(
+                text = if (stopped) s.rerun else s.restartServer,
+                onClick = { confirmRerun = true },
+                glyph = Symbols.restartAlt,
+                enabled = !busy && !provisioning,
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            )
+            OutlinedAction(
+                text = s.backup,
+                onClick = onBackup,
+                glyph = Symbols.backup,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            )
             DestructiveAction(
                 text = s.stopServer,
                 onClick = { confirmStop = true },
@@ -230,7 +230,7 @@ private fun SecretRow(
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
     ListItem(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().flushListRow(),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         overlineContent = { Text(label, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant) },
         headlineContent = {

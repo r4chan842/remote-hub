@@ -33,6 +33,7 @@ import app.remotehub.app.SetupItem
 import app.remotehub.design.DetailRow
 import app.remotehub.design.ExpandableHelp
 import app.remotehub.design.IconSize
+import app.remotehub.design.flushListRow
 import app.remotehub.design.InlineMessage
 import app.remotehub.design.MessageTone
 import app.remotehub.design.label
@@ -297,7 +298,7 @@ private fun ServiceSection(
 
     Section(title = title) {
         ListItem(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().flushListRow(),
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             leadingContent = {
                 Symbol(

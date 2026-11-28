@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.remotehub.design.EmptyState
 import app.remotehub.design.IconSize
+import app.remotehub.design.flushListRow
 import app.remotehub.design.Layout
 import app.remotehub.design.RowDivider
 import app.remotehub.design.Spacing
@@ -172,7 +173,7 @@ private fun ServerRow(
     val address = server.connection?.address?.ifBlank { null } ?: server.repositoryFullName
 
     ListItem(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        modifier = Modifier.fillMaxWidth().flushListRow().clickable(onClick = onOpen),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = {
             Surface(

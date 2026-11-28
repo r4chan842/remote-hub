@@ -26,6 +26,7 @@ import app.remotehub.design.DetailRow
 import app.remotehub.design.DestructiveAction
 import app.remotehub.design.EmptyState
 import app.remotehub.design.IconSize
+import app.remotehub.design.flushListRow
 import app.remotehub.design.InlineMessage
 import app.remotehub.design.LocalStatusColors
 import app.remotehub.design.MessageTone
@@ -79,7 +80,7 @@ fun NetworkContent(
             // ---- tunnel ----
             Section(title = s.networkTitle) {
                 ListItem(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().flushListRow(),
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     leadingContent = {
                         Surface(
@@ -196,7 +197,7 @@ fun NetworkContent(
                 } else {
                     devices.forEach { device ->
                         ListItem(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().flushListRow(),
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             leadingContent = {
                                 Symbol(Symbols.computer, size = IconSize.standard, tint = scheme.onSurfaceVariant)

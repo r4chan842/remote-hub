@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -54,6 +55,23 @@ import app.remotehub.domain.ServerState
 import app.remotehub.domain.StepStatus
 import app.remotehub.i18n.AppStrings
 import app.remotehub.i18n.LocalStrings
+
+/**
+ * Cancels ListItem's built-in 16 dp horizontal inset.
+ *
+ * ListItem pads its own content, and ScreenContent already applies the window margin.
+ * Stacking the two indented every row 16 dp past its section header and past the text
+ * fields beside it, which is visible as a broken left edge on every screen. This measures
+ * the row wider and places it back by the inset, so the content lands on the screen grid
+ * while the component keeps its own internal layout. placeRelative mirrors it for RTL.
+ */
+fun Modifier.flushListRow(): Modifier = this.layout { measurable, constraints ->
+    val inset = Spacing.lg.roundToPx()
+    val placeable = measurable.measure(
+        constraints.copy(minWidth = 0, maxWidth = constraints.maxWidth + inset * 2),
+    )
+    layout(constraints.maxWidth, placeable.height) { placeable.placeRelative(-inset, 0) }
+}
 
 // --------------------------------------------------------------------------- state colours
 
@@ -74,7 +92,7 @@ fun stateColors(state: ServerState): Pair<Color, Color> {
     return when (state) {
         ServerState.Ready -> status.successContainer to status.onSuccessContainer
         ServerState.Connected -> scheme.primaryContainer to scheme.onPrimaryContainer
-        ServerState.Provisioning -> scheme.tertiaryContainer to scheme.onTertiaryContainer
+        ServerState.Provisioning -> scheme.secondaryContainer to scheme.onSecondaryContainer
         ServerState.Expiring -> status.warningContainer to status.onWarningContainer
         ServerState.Failed -> scheme.errorContainer to scheme.onErrorContainer
         ServerState.Stopping -> status.warningContainer to status.onWarningContainer
@@ -199,7 +217,7 @@ fun DetailRow(
 ) {
     val s = LocalStrings.current
     ListItem(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().flushListRow(),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = {
             Text(
@@ -240,7 +258,7 @@ fun SwitchRow(
     control: @Composable () -> Unit,
 ) {
     ListItem(
-        modifier = modifier.fillMaxWidth().clickable(enabled = enabled) { onCheckedChange(!checked) },
+        modifier = modifier.fillMaxWidth().flushListRow().clickable(enabled = enabled) { onCheckedChange(!checked) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
         supportingContent = subtitle?.let {
@@ -262,7 +280,7 @@ fun NavigationRow(
 ) {
     val scheme = MaterialTheme.colorScheme
     ListItem(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = modifier.fillMaxWidth().flushListRow().clickable(onClick = onClick),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = glyph?.let {
             { Symbol(it, size = IconSize.standard, tint = scheme.onSurfaceVariant) }
@@ -588,7 +606,7 @@ fun StepRow(
     val scheme = MaterialTheme.colorScheme
     val statusColors = LocalStatusColors.current
     ListItem(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().flushListRow(),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = {
             Box(Modifier.size(IconSize.standard), contentAlignment = Alignment.Center) {
