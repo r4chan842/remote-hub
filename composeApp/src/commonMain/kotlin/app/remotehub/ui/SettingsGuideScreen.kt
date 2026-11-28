@@ -7,28 +7,35 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import app.remotehub.design.NoticeBanner
-import app.remotehub.design.Panel
-import app.remotehub.design.SectionTitle
-import app.remotehub.design.Symbol
+import app.remotehub.design.InlineMessage
+import app.remotehub.design.MessageTone
+import app.remotehub.design.NavigationRow
+import app.remotehub.design.RowDivider
+import app.remotehub.design.ScreenContent
+import app.remotehub.design.Section
+import app.remotehub.design.Spacing
+import app.remotehub.design.SwitchRow
 import app.remotehub.design.Symbols
-import app.remotehub.design.WarningBanner
 import app.remotehub.i18n.LocalStrings
 import app.remotehub.i18n.availableLocales
 
+/**
+ * Settings, grouped by what the setting affects.
+ *
+ * Every group used to be a Card, and the alert threshold was three text buttons whose
+ * selected state was a literal "●" character. Groups are now subheader + rows, and the
+ * threshold is a real single-select chip row, so selection is conveyed by the component
+ * rather than by punctuation.
+ */
 @Composable
 fun SettingsContent(
     themeMode: Int,
@@ -46,106 +53,102 @@ fun SettingsContent(
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Panel {
-            SectionTitle(s.appearance)
+    ScreenContent(modifier) {
+        Section(title = s.appearance) {
+            val options = listOf(s.themeSystem, s.themeLight, s.themeDark)
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                listOf(s.themeSystem, s.themeLight, s.themeDark).forEachIndexed { index, label ->
+                options.forEachIndexed { index, label ->
                     SegmentedButton(
                         selected = themeMode == index,
                         onClick = { onTheme(index) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = 3),
-                    ) { Text(label, style = MaterialTheme.typography.labelMedium) }
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                        icon = {},
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                    )
                 }
             }
         }
 
-        Panel {
-            SectionTitle(s.language)
+        Section(title = s.language) {
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 availableLocales.forEachIndexed { index, locale ->
                     SegmentedButton(
                         selected = localeTag == locale.first,
                         onClick = { onLocale(locale.first) },
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = availableLocales.size),
-                    ) { Text(locale.second, style = MaterialTheme.typography.labelMedium) }
+                        icon = {},
+                        label = { Text(locale.second, style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                    )
                 }
             }
         }
 
-        Panel {
-            SectionTitle(s.notificationsTitle)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(s.expiryAlert, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurface)
-                    Text(s.expiryAlertHint, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                }
-                Switch(checked = expiryAlertEnabled, onCheckedChange = onExpiryAlert)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 10.dp)) {
-                listOf(10, 15, 30).forEach { minutes ->
-                    TextButton(onClick = { onWarningMinutes(minutes) }) {
-                        Text(
-                            if (warningMinutes == minutes) "● $minutes" else "$minutes",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (warningMinutes == minutes) scheme.primary else scheme.onSurfaceVariant,
+        RowDivider()
+
+        Section(title = s.notificationsTitle) {
+            SwitchRow(
+                title = s.expiryAlert,
+                subtitle = s.expiryAlertHint,
+                checked = expiryAlertEnabled,
+                onCheckedChange = onExpiryAlert,
+                control = { Switch(checked = expiryAlertEnabled, onCheckedChange = onExpiryAlert) },
+            )
+            Column(Modifier.padding(top = Spacing.sm)) {
+                Text(
+                    s.alertThreshold,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = Spacing.sm),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    listOf(10, 15, 30).forEach { minutes ->
+                        FilterChip(
+                            selected = warningMinutes == minutes,
+                            onClick = { onWarningMinutes(minutes) },
+                            enabled = expiryAlertEnabled,
+                            label = { Text("$minutes ${s.minutes}", style = MaterialTheme.typography.labelLarge) },
+                            leadingIcon = if (warningMinutes == minutes) {
+                                { app.remotehub.design.Symbol(Symbols.check, size = app.remotehub.design.IconSize.compact) }
+                            } else null,
                         )
                     }
                 }
             }
         }
 
-        Panel {
-            SectionTitle(s.diagnosticsSection)
-            Text(s.diagnosticsHint, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-            TextButton(onClick = onLogs, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                Symbol(Symbols.terminal, size = 18.dp)
-                Text("  " + s.logsTitle, style = MaterialTheme.typography.labelLarge)
-            }
+        RowDivider()
+
+        Section(title = s.diagnosticsSection, subtitle = s.diagnosticsHint) {
+            NavigationRow(title = s.logsTitle, glyph = Symbols.terminal, onClick = onLogs)
         }
 
-        Panel {
-            SectionTitle(s.guides)
-            listOf("github" to s.guideGithub, "tailscale" to s.guideTailscale, "rdp" to s.guideRdp, "security" to s.guideSecurity)
-                .forEach { (id, title) ->
-                    TextButton(onClick = { onGuide(id) }, modifier = Modifier.fillMaxWidth()) {
-                        Symbol(Symbols.info, size = 18.dp)
-                        Text("  $title", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
+        Section(title = s.guides) {
+            NavigationRow(s.guideGithub, { onGuide("github") }, glyph = Symbols.info)
+            NavigationRow(s.guideTailscale, { onGuide("tailscale") }, glyph = Symbols.info)
+            NavigationRow(s.guideRdp, { onGuide("rdp") }, glyph = Symbols.info)
+            NavigationRow(s.guideSecurity, { onGuide("security") }, glyph = Symbols.shield)
         }
 
-        NoticeBanner(s.privacyNote)
+        InlineMessage(s.privacyNote, tone = MessageTone.Info)
     }
 }
 
+/** A guide is prose. One section, numbered lines, no card per paragraph. */
 @Composable
 fun GuideContent(guideId: String, modifier: Modifier = Modifier) {
     val s = LocalStrings.current
-    val scheme = MaterialTheme.colorScheme
     val (title, steps) = when (guideId) {
         "github" -> s.guideGithub to listOf(s.githubStep1, s.githubStep2, s.githubStep3, s.scopesNote)
         "tailscale" -> s.guideTailscale to listOf(s.tailscaleStep1, s.tailscaleStep2, s.tailscaleStep3, s.networkNote)
         "rdp" -> s.guideRdp to listOf(s.rdpGuide1, s.rdpGuide2, s.rdpGuide3)
         else -> s.guideSecurity to listOf(s.security1, s.security2, s.security3, s.security4)
     }
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text(title, style = MaterialTheme.typography.headlineSmall, color = scheme.onSurface)
-        steps.forEachIndexed { index, text ->
-            Panel { NumberedStep(index + 1, text) }
+    ScreenContent(modifier) {
+        Section(title = title) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                steps.forEachIndexed { index, text -> NumberedStep(index + 1, text) }
+            }
         }
-        if (guideId == "security") WarningBanner(s.riskNote)
+        if (guideId == "security") InlineMessage(s.riskNote, tone = MessageTone.Warning)
     }
 }

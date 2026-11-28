@@ -1,39 +1,59 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package app.remotehub.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import app.remotehub.app.SessionMath
-import app.remotehub.design.InfoRow
-import app.remotehub.design.NoticeBanner
-import app.remotehub.design.Panel
-import app.remotehub.design.SectionTitle
-import app.remotehub.design.StatePill
-import app.remotehub.design.CornerRadius
+import androidx.compose.ui.graphics.Color
+import app.remotehub.design.ConfirmDialog
+import app.remotehub.design.DetailRow
+import app.remotehub.design.DestructiveAction
+import app.remotehub.design.IconSize
+import app.remotehub.design.InlineMessage
+import app.remotehub.design.LoadingState
+import app.remotehub.design.MessageTone
+import app.remotehub.design.OutlinedAction
+import app.remotehub.design.PrimaryAction
+import app.remotehub.design.RowDivider
+import app.remotehub.design.ScreenContent
+import app.remotehub.design.Section
+import app.remotehub.design.Spacing
+import app.remotehub.design.StatusBadge
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
+import app.remotehub.design.TextAction
 import app.remotehub.design.TimeMeter
-import app.remotehub.design.WarningBanner
+import app.remotehub.design.TonalAction
+import app.remotehub.design.ltrStyle
 import app.remotehub.domain.ServerSession
 import app.remotehub.domain.ServerState
 import app.remotehub.i18n.LocalStrings
 
-/** Step 4: everything needed to reach the machine, and four clear actions. */
+/**
+ * Everything needed to reach one machine, and the actions that manage its life.
+ *
+ * Changes: the name is no longer repeated under a top bar that already shows it; the
+ * connection facts are list rows instead of a fixed-width label column inside a card;
+ * the password is masked with an explicit reveal control; and the four actions are
+ * ranked instead of being four equal pills. Stop is destructive, so it is outlined in
+ * the error role and sits behind a confirmation.
+ */
 @Composable
 fun SessionDetailContent(
     server: ServerSession,
@@ -54,24 +74,27 @@ fun SessionDetailContent(
     val connection = server.connection
     val expiring = server.state == ServerState.Expiring
     val stopped = server.state == ServerState.Stopped || server.state == ServerState.Failed
+    val provisioning = server.state == ServerState.Provisioning
+    var confirmStop by rememberSaveable { mutableStateOf(false) }
+    var confirmRerun by rememberSaveable { mutableStateOf(false) }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(server.name, style = MaterialTheme.typography.headlineSmall, color = scheme.onSurface)
-                Text(server.spec.operatingSystem, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+    ScreenContent(modifier) {
+        // ---- state of the machine ----
+        Section(title = s.sessionSummary) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                StatusBadge(server.state)
+                Text(
+                    server.spec.operatingSystem,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
             }
-            StatePill(server.state)
-        }
-
-        if (!stopped) {
-            Panel {
+            if (!stopped && server.remainingLabel.isNotBlank()) {
                 TimeMeter(
                     fraction = server.remainingFraction,
                     remaining = server.remainingLabel,
@@ -79,89 +102,157 @@ fun SessionDetailContent(
                     warning = expiring,
                 )
             }
-        }
-        if (expiring) {
-            WarningBanner(s.expiringBanner)
-        }
-        if (stopped) {
-            NoticeBanner(s.stoppedBanner)
+            if (expiring) InlineMessage(s.expiringBanner, tone = MessageTone.Warning)
+            if (stopped) InlineMessage(s.stoppedBanner, tone = MessageTone.Info)
+            if (server.lastError != null) InlineMessage(server.lastError!!, tone = MessageTone.Error)
         }
 
-        Panel {
-            SectionTitle(s.connectionInfo)
+        RowDivider()
+
+        // ---- how to reach it ----
+        Section(title = s.connectionInfo) {
             if (connection == null || connection.address.isBlank()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(vertical = 8.dp),
-                ) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text(s.findingAddress, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
-                }
+                LoadingState(s.findingAddress)
             } else {
-                InfoRow(s.address, connection.address, monospace = true, onCopy = { onCopy(s.address, connection.address) })
-                InfoRow(s.port, connection.port.toString(), monospace = true, onCopy = { onCopy(s.port, connection.port.toString()) })
+                DetailRow(s.address, connection.address, mono = true, onCopy = { onCopy(s.address, connection.address) })
+                DetailRow(s.port, connection.port.toString(), mono = true, onCopy = { onCopy(s.port, connection.port.toString()) })
             }
             if (connection != null) {
-                InfoRow(s.username, connection.username, monospace = true, onCopy = { onCopy(s.username, connection.username) })
-                InfoRow(
+                DetailRow(s.username, connection.username, mono = true, onCopy = { onCopy(s.username, connection.username) })
+                SecretRow(
                     label = s.password,
-                    value = if (passwordVisible) connection.password else "••••••••••••",
-                    monospace = true,
+                    value = connection.password,
+                    revealed = passwordVisible,
+                    onToggle = onTogglePassword,
                     onCopy = { onCopy(s.password, connection.password) },
                 )
-                TextButton(onClick = onTogglePassword) {
-                    Text(if (passwordVisible) s.hidePassword else s.showPassword, style = MaterialTheme.typography.labelMedium)
-                }
             }
         }
 
-        if (error != null) WarningBanner(error)
+        RowDivider()
 
-        Button(
-            onClick = onConnect,
-            enabled = !stopped && connection?.address?.isNotBlank() == true && !busy,
-            shape = CornerRadius.full,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Symbol(Symbols.desktopWindows, size = 20.dp)
-            Text("  " + s.connectRemote, style = MaterialTheme.typography.labelLarge)
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(onClick = onBackup, enabled = !busy, shape = MaterialTheme.shapes.large, modifier = Modifier.weight(1f)) {
-                Symbol(Symbols.backup, size = 18.dp)
-                Text("  " + s.backup, style = MaterialTheme.typography.labelMedium)
+        // ---- what the user can do, ranked ----
+        Section(title = s.serverActions, subtitle = s.restartHint) {
+            if (error != null) {
+                InlineMessage(error, tone = MessageTone.Error)
+                androidx.compose.foundation.layout.Spacer(Modifier.height(Spacing.sm))
             }
-            OutlinedButton(onClick = onRerun, enabled = !busy, shape = CornerRadius.full, modifier = Modifier.weight(1f)) {
-                Symbol(Symbols.restartAlt, size = 18.dp)
-                Text("  " + s.restartServer, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            PrimaryAction(
+                text = s.connectRemote,
+                onClick = onConnect,
+                glyph = Symbols.desktopWindows,
+                enabled = !stopped && connection?.address?.isNotBlank() == true && !busy,
+                loading = busy && !stopped,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = Spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                TonalAction(
+                    text = if (stopped) s.rerun else s.restartServer,
+                    onClick = { confirmRerun = true },
+                    glyph = Symbols.restartAlt,
+                    enabled = !busy && !provisioning,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedAction(
+                    text = s.backup,
+                    onClick = onBackup,
+                    glyph = Symbols.backup,
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f),
+                )
             }
+            DestructiveAction(
+                text = s.stopServer,
+                onClick = { confirmStop = true },
+                glyph = Symbols.stop,
+                enabled = !stopped && !busy,
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            )
         }
-        OutlinedButton(
-            onClick = onStop,
-            enabled = !stopped && !busy,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Symbol(Symbols.stop, size = 18.dp)
-            Text("  " + s.stopServer, style = MaterialTheme.typography.labelMedium)
-        }
-
-        NoticeBanner(s.restartHint)
 
         if (server.backups.isNotEmpty()) {
-            Panel {
-                SectionTitle(s.backups)
+            RowDivider()
+            Section(title = s.backups) {
                 server.backups.takeLast(5).forEach { record ->
-                    InfoRow(record.commitRef.ifBlank { record.id.substringAfterLast('/') }, record.sizeLabel)
+                    DetailRow(
+                        label = record.createdAtLabel.ifBlank { record.id.substringAfterLast('/') },
+                        value = record.commitRef.ifBlank { record.sizeLabel },
+                        mono = true,
+                    )
                 }
             }
         }
 
-        TextButton(onClick = onOpenRun, modifier = Modifier.fillMaxWidth()) {
-            Symbol(Symbols.openInNew, size = 16.dp)
-            Text("  " + s.openWorkflowRun, style = MaterialTheme.typography.labelMedium)
-        }
+        TextAction(s.openWorkflowRun, onOpenRun, glyph = Symbols.openInNew)
     }
+
+    if (confirmStop) {
+        ConfirmDialog(
+            title = s.stopConfirmTitle,
+            body = s.stopConfirmBody,
+            confirmLabel = s.stopServer,
+            dismissLabel = s.cancel,
+            destructive = true,
+            glyph = Symbols.warning,
+            onConfirm = { confirmStop = false; onStop() },
+            onDismiss = { confirmStop = false },
+        )
+    }
+    if (confirmRerun) {
+        ConfirmDialog(
+            title = s.restartServer,
+            body = s.restartHint,
+            confirmLabel = s.confirm,
+            dismissLabel = s.cancel,
+            glyph = Symbols.restartAlt,
+            onConfirm = { confirmRerun = false; onRerun() },
+            onDismiss = { confirmRerun = false },
+        )
+    }
+}
+
+/**
+ * A credential. Masked by default, revealed only on an explicit action, and the reveal
+ * control states what it will do — the old screen left a "Show password" text button
+ * detached from the value it affected.
+ */
+@Composable
+private fun SecretRow(
+    label: String,
+    value: String,
+    revealed: Boolean,
+    onToggle: () -> Unit,
+    onCopy: () -> Unit,
+) {
+    val s = LocalStrings.current
+    val scheme = MaterialTheme.colorScheme
+    ListItem(
+        modifier = Modifier.fillMaxWidth(),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        overlineContent = { Text(label, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant) },
+        headlineContent = {
+            Text(
+                if (revealed) value else "••••••••••••",
+                style = ltrStyle(),
+                color = scheme.onSurface,
+            )
+        },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onToggle) {
+                    Symbol(
+                        if (revealed) Symbols.visibilityOff else Symbols.visibility,
+                        size = IconSize.medium,
+                        tint = scheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onCopy) {
+                    Symbol(Symbols.contentCopy, size = IconSize.medium, tint = scheme.onSurfaceVariant)
+                }
+            }
+        },
+    )
 }

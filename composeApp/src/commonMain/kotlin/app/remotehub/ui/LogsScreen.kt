@@ -27,13 +27,13 @@ import androidx.compose.ui.unit.dp
 import app.remotehub.app.LogEntry
 import app.remotehub.app.LogLevel
 import app.remotehub.design.EmptyState
-import app.remotehub.design.NoticeBanner
-import app.remotehub.design.Panel
-import app.remotehub.design.SectionTitle
+import app.remotehub.design.InlineMessage
+import app.remotehub.design.MessageTone
+import app.remotehub.design.Section
+import app.remotehub.design.Spacing
+import app.remotehub.design.TextAction
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
-import app.remotehub.design.TagChip
-import app.remotehub.design.WarningBanner
 import app.remotehub.i18n.LocalStrings
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -75,13 +75,13 @@ fun LogsContent(
         "system" to s.logsSystem,
     )
 
-    Column(modifier.fillMaxSize().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)) {
+    Column(modifier.fillMaxSize().padding(start = Spacing.lg, end = Spacing.lg, top = Spacing.sm, bottom = Spacing.md)) {
         if (crashNotice != null) {
-            WarningBanner(crashNotice, Modifier.padding(bottom = 10.dp).clickable(onClick = onDismissCrash))
+            InlineMessage(crashNotice, Modifier.padding(bottom = Spacing.md), tone = MessageTone.Error, onClick = onDismissCrash)
         }
 
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            Modifier.fillMaxWidth().padding(bottom = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -90,38 +90,32 @@ fun LogsContent(
                 color = scheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onRefresh) {
-                Symbol(Symbols.refresh, size = 18.dp)
-                Text("  " + s.retry, style = MaterialTheme.typography.labelLarge)
-            }
-            TextButton(onClick = onCopy) {
-                Symbol(Symbols.contentCopy, size = 18.dp)
-                Text("  " + s.logsCopy, style = MaterialTheme.typography.labelLarge)
-            }
+            TextAction(s.retry, onRefresh, glyph = Symbols.refresh)
+            TextAction(s.logsCopy, onCopy, glyph = Symbols.contentCopy)
         }
 
         OutlinedTextField(
             value = query,
             onValueChange = onQuery,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.sm),
             singleLine = true,
             label = { Text(s.logsSearchHint) },
             leadingIcon = { Symbol(Symbols.search, size = 20.dp) },
         )
 
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.fillMaxWidth().padding(bottom = Spacing.sm),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
             // Two short rows keep every filter reachable on a phone without a
             // horizontal scroll that hides half of them.
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     filters.take(4).forEach { (id, label) ->
                         FilterChip(selected = filter == id, onClick = { onFilter(id) }, label = { Text(label) })
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     filters.drop(4).forEach { (id, label) ->
                         FilterChip(selected = filter == id, onClick = { onFilter(id) }, label = { Text(label) })
                     }
@@ -130,11 +124,11 @@ fun LogsContent(
         }
 
         if (entries.isEmpty()) {
-            EmptyState(Symbols.terminal, s.logsEmpty, s.logsEmptyHint, Modifier.padding(top = 24.dp))
+            EmptyState(Symbols.terminal, s.logsEmpty, s.logsEmptyHint, Modifier.padding(top = Spacing.xl))
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
                 items(entries, key = { it.seq }) { entry ->
                     LogRow(
@@ -144,20 +138,13 @@ fun LogsContent(
                     )
                 }
                 item {
-                    Column(Modifier.padding(top = 12.dp)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = onShare) {
-                                Symbol(Symbols.send, size = 18.dp)
-                                Text("  " + s.logsShare, style = MaterialTheme.typography.labelLarge)
-                            }
-                            TextButton(onClick = onClear) {
-                                Symbol(Symbols.delete, size = 18.dp)
-                                Text("  " + s.logsClear, style = MaterialTheme.typography.labelLarge)
-                            }
+                    Column(Modifier.padding(top = Spacing.md)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            TextAction(s.logsShare, onShare, glyph = Symbols.send)
+                            TextAction(s.logsClear, onClear, glyph = Symbols.delete)
                         }
                         if (environment.isNotBlank()) {
-                            Panel(Modifier.padding(top = 8.dp)) {
-                                SectionTitle(s.logsEnvironment)
+                            Section(s.logsEnvironment, Modifier.padding(top = Spacing.sm)) {
                                 SelectionContainer {
                                     Text(
                                         environment,
@@ -170,7 +157,7 @@ fun LogsContent(
                                 }
                             }
                         }
-                        NoticeBanner(s.diagnosticsHint)
+                        InlineMessage(s.diagnosticsHint)
                     }
                 }
             }
@@ -189,7 +176,7 @@ private fun LogRow(entry: LogEntry, expanded: Boolean, onClick: () -> Unit) {
     }
     val time = formatLogTime(entry.timeMillis)
 
-    Panel(Modifier.clickable(onClick = onClick)) {
+    LogEntrySurface(onClick = onClick) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 time,
@@ -199,9 +186,11 @@ private fun LogRow(entry: LogEntry, expanded: Boolean, onClick: () -> Unit) {
                 ),
                 color = scheme.onSurfaceVariant,
             )
-            Text("  ", style = MaterialTheme.typography.labelSmall)
-            TagChip(entry.level.name, tone = tone.copy(alpha = 0.14f), content = tone, ltr = true)
-            Text("  ", style = MaterialTheme.typography.labelSmall)
+            androidx.compose.foundation.layout.Spacer(Modifier.width(Spacing.sm))
+            androidx.compose.material3.Badge(containerColor = tone.copy(alpha = 0.16f), contentColor = tone) {
+                Text(entry.level.name, style = MaterialTheme.typography.labelSmall)
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.width(Spacing.sm))
             Text(
                 entry.source,
                 style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr),
@@ -217,7 +206,7 @@ private fun LogRow(entry: LogEntry, expanded: Boolean, onClick: () -> Unit) {
                 entry.message,
                 style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
                 color = if (entry.level == LogLevel.Error) scheme.error else scheme.onSurface,
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier.padding(top = Spacing.sm),
             )
         }
         if (expanded && entry.detail.isNotBlank()) {
@@ -229,7 +218,7 @@ private fun LogRow(entry: LogEntry, expanded: Boolean, onClick: () -> Unit) {
                         textDirection = TextDirection.Ltr,
                     ),
                     color = scheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = Spacing.sm),
                 )
             }
         }
@@ -248,4 +237,21 @@ private fun pad3(value: Long): String = when {
     value < 10 -> "00$value"
     value < 100 -> "0$value"
     else -> value.toString()
+}
+
+/** One log record. A single flat container with the standard small shape. */
+@Composable
+private fun LogEntrySurface(onClick: () -> Unit, content: @Composable () -> Unit) {
+    androidx.compose.material3.Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        androidx.compose.foundation.layout.Column(
+            Modifier.padding(app.remotehub.design.Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(app.remotehub.design.Spacing.xs),
+        ) { content() }
+    }
 }

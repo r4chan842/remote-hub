@@ -230,6 +230,34 @@ class AppStrings(
     val username: String = values.getValue("username")
     val password: String = values.getValue("password")
     val copy: String = values.getValue("copy")
+    val confirm: String = values.getValue("confirm")
+    val requiredConnections: String = values.getValue("requiredConnections")
+    val setupDone: String = values.getValue("setupDone")
+    val serverActions: String = values.getValue("serverActions")
+    val sessionSummary: String = values.getValue("sessionSummary")
+    val stopConfirmTitle: String = values.getValue("stopConfirmTitle")
+    val stopConfirmBody: String = values.getValue("stopConfirmBody")
+    val cancelConfirmTitle: String = values.getValue("cancelConfirmTitle")
+    val cancelConfirmBody: String = values.getValue("cancelConfirmBody")
+    val disconnectConfirmTitle: String = values.getValue("disconnectConfirmTitle")
+    val disconnectConfirmBody: String = values.getValue("disconnectConfirmBody")
+    val phaseValidating: String = values.getValue("phaseValidating")
+    val phaseInitializing: String = values.getValue("phaseInitializing")
+    val phaseCreatingRepo: String = values.getValue("phaseCreatingRepo")
+    val phaseRunningWorkflow: String = values.getValue("phaseRunningWorkflow")
+    val phaseConnecting: String = values.getValue("phaseConnecting")
+    val phaseCompleted: String = values.getValue("phaseCompleted")
+    val phaseFailed: String = values.getValue("phaseFailed")
+    val phaseCancelled: String = values.getValue("phaseCancelled")
+    val operationRunning: String = values.getValue("operationRunning")
+    val viewProgress: String = values.getValue("viewProgress")
+    val copiedToClipboard: String = values.getValue("copiedToClipboard")
+    val revealValue: String = values.getValue("revealValue")
+    val hideValue: String = values.getValue("hideValue")
+    val retryAction: String = values.getValue("retryAction")
+    val offlineNotice: String = values.getValue("offlineNotice")
+    val setupHelpToken: String = values.getValue("setupHelpToken")
+    val setupHelpKey: String = values.getValue("setupHelpKey")
     val show: String = values.getValue("show")
     val hide: String = values.getValue("hide")
     val fingerprint: String = values.getValue("fingerprint")
@@ -465,6 +493,34 @@ val requiredKeys: List<String> = listOf(
     "errVpnHint",
     "peersTitle",
     "peersEmpty",
+    "confirm",
+    "requiredConnections",
+    "setupDone",
+    "serverActions",
+    "sessionSummary",
+    "stopConfirmTitle",
+    "stopConfirmBody",
+    "cancelConfirmTitle",
+    "cancelConfirmBody",
+    "disconnectConfirmTitle",
+    "disconnectConfirmBody",
+    "phaseValidating",
+    "phaseInitializing",
+    "phaseCreatingRepo",
+    "phaseRunningWorkflow",
+    "phaseConnecting",
+    "phaseCompleted",
+    "phaseFailed",
+    "phaseCancelled",
+    "operationRunning",
+    "viewProgress",
+    "copiedToClipboard",
+    "revealValue",
+    "hideValue",
+    "retryAction",
+    "offlineNotice",
+    "setupHelpToken",
+    "setupHelpKey",
 )
 
 val Persian = AppStrings("fa", true, mapOf(
@@ -768,6 +824,34 @@ val Persian = AppStrings("fa", true, mapOf(
     "username" to "نام کاربری",
     "password" to "گذرواژه",
     "copy" to "کپی",
+    "confirm" to "تأیید",
+    "requiredConnections" to "اتصال‌های لازم",
+    "setupDone" to "هر دو سرویس متصل هستند.",
+    "serverActions" to "عملیات سرور",
+    "sessionSummary" to "نشست",
+    "stopConfirmTitle" to "این سرور متوقف شود؟",
+    "stopConfirmBody" to "ماشین حذف می‌شود و هر چه روی آن ذخیره کرده‌اید از بین می‌رود. بکاپ‌های رمزنگاری‌شده می‌مانند.",
+    "cancelConfirmTitle" to "ساخت سرور لغو شود؟",
+    "cancelConfirmBody" to "ورک‌فلو متوقف می‌شود. هر چه تا الآن ساخته شده در ریپازیتوری شما می‌ماند.",
+    "disconnectConfirmTitle" to "این سرویس قطع شود؟",
+    "disconnectConfirmBody" to "اطلاعات ورود از این دستگاه پاک می‌شود. سرورهای موجود به کار خود ادامه می‌دهند.",
+    "phaseValidating" to "بررسی درخواست",
+    "phaseInitializing" to "تأیید حساب",
+    "phaseCreatingRepo" to "آماده‌سازی ریپازیتوری",
+    "phaseRunningWorkflow" to "ساخت ماشین",
+    "phaseConnecting" to "اتصال به شبکهٔ خصوصی",
+    "phaseCompleted" to "آماده",
+    "phaseFailed" to "ساخت ناموفق",
+    "phaseCancelled" to "ساخت لغو شد",
+    "operationRunning" to "یک سرور در حال ساخت است",
+    "viewProgress" to "دیدن پیشرفت",
+    "copiedToClipboard" to "کپی شد",
+    "revealValue" to "نمایش",
+    "hideValue" to "پنهان",
+    "retryAction" to "تلاش دوباره",
+    "offlineNotice" to "اتصالی نیست. مقادیر نمایش‌داده‌شده آخرین مقادیر دریافتی هستند.",
+    "setupHelpToken" to "روش ساخت توکن",
+    "setupHelpKey" to "روش ساخت کلید",
     "show" to "نمایش",
     "hide" to "مخفی",
     "fingerprint" to "اثر انگشت گواهی",
@@ -1129,6 +1213,34 @@ val English = AppStrings("en", false, mapOf(
     "username" to "Username",
     "password" to "Password",
     "copy" to "Copy",
+    "confirm" to "Confirm",
+    "requiredConnections" to "Required connections",
+    "setupDone" to "Both services are connected.",
+    "serverActions" to "Server actions",
+    "sessionSummary" to "Session",
+    "stopConfirmTitle" to "Stop this server?",
+    "stopConfirmBody" to "The machine is deleted and anything saved on it is lost. Encrypted backups are kept.",
+    "cancelConfirmTitle" to "Cancel creation?",
+    "cancelConfirmBody" to "The workflow is stopped. Anything already created stays in your repository.",
+    "disconnectConfirmTitle" to "Disconnect this service?",
+    "disconnectConfirmBody" to "The stored credential is removed from this device. Existing servers keep running.",
+    "phaseValidating" to "Checking the request",
+    "phaseInitializing" to "Verifying the account",
+    "phaseCreatingRepo" to "Preparing the repository",
+    "phaseRunningWorkflow" to "Building the machine",
+    "phaseConnecting" to "Joining the private network",
+    "phaseCompleted" to "Ready",
+    "phaseFailed" to "Creation failed",
+    "phaseCancelled" to "Creation cancelled",
+    "operationRunning" to "A server is being created",
+    "viewProgress" to "View progress",
+    "copiedToClipboard" to "Copied",
+    "revealValue" to "Show",
+    "hideValue" to "Hide",
+    "retryAction" to "Try again",
+    "offlineNotice" to "No connection. Values shown are the last ones received.",
+    "setupHelpToken" to "How to create a token",
+    "setupHelpKey" to "How to create a key",
     "show" to "Show",
     "hide" to "Hide",
     "fingerprint" to "Certificate fingerprint",
@@ -1490,6 +1602,34 @@ val Arabic = AppStrings("ar", true, mapOf(
     "username" to "اسم المستخدم",
     "password" to "كلمة المرور",
     "copy" to "نسخ",
+    "confirm" to "تأكيد",
+    "requiredConnections" to "الاتصالات المطلوبة",
+    "setupDone" to "كلا الخدمتين متصلتان.",
+    "serverActions" to "إجراءات الخادم",
+    "sessionSummary" to "الجلسة",
+    "stopConfirmTitle" to "إيقاف هذا الخادم؟",
+    "stopConfirmBody" to "سيتم حذف الجهاز وفقدان كل ما حُفظ عليه. تبقى النسخ الاحتياطية المشفّرة.",
+    "cancelConfirmTitle" to "إلغاء الإنشاء؟",
+    "cancelConfirmBody" to "سيتم إيقاف سير العمل. ما أُنشئ بالفعل يبقى في مستودعك.",
+    "disconnectConfirmTitle" to "قطع هذه الخدمة؟",
+    "disconnectConfirmBody" to "تُزال بيانات الاعتماد من هذا الجهاز. تستمر الخادمات الحالية في العمل.",
+    "phaseValidating" to "التحقق من الطلب",
+    "phaseInitializing" to "التحقق من الحساب",
+    "phaseCreatingRepo" to "تهيئة المستودع",
+    "phaseRunningWorkflow" to "بناء الجهاز",
+    "phaseConnecting" to "الانضمام إلى الشبكة الخاصة",
+    "phaseCompleted" to "جاهز",
+    "phaseFailed" to "فشل الإنشاء",
+    "phaseCancelled" to "أُلغي الإنشاء",
+    "operationRunning" to "يتم إنشاء خادم",
+    "viewProgress" to "عرض التقدم",
+    "copiedToClipboard" to "تم النسخ",
+    "revealValue" to "إظهار",
+    "hideValue" to "إخفاء",
+    "retryAction" to "إعادة المحاولة",
+    "offlineNotice" to "لا يوجد اتصال. القيم المعروضة هي آخر ما تم استلامه.",
+    "setupHelpToken" to "كيفية إنشاء رمز",
+    "setupHelpKey" to "كيفية إنشاء مفتاح",
     "show" to "إظهار",
     "hide" to "إخفاء",
     "fingerprint" to "بصمة الشهادة",

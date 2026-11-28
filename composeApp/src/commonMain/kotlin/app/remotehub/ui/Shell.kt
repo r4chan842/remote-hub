@@ -2,10 +2,7 @@
 
 package app.remotehub.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,193 +10,209 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.remotehub.design.CornerRadius
+import app.remotehub.app.Tab
+import app.remotehub.design.IconSize
+import app.remotehub.design.LocalWindowClass
+import app.remotehub.design.Spacing
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
+import app.remotehub.design.WindowClass
 import app.remotehub.i18n.AppStrings
 import app.remotehub.i18n.LocalStrings
 
-enum class Destination {
-    Dashboard,
-    Servers,
-    Network,
-    Settings,
-}
+/**
+ * The four persistent destinations. Kept as a UI-level alias of [Tab] so the navigation
+ * model owns the truth and the shell only renders it.
+ */
+typealias Destination = Tab
 
 fun Destination.glyph(): String = when (this) {
-    Destination.Dashboard -> Symbols.dashboard
-    Destination.Servers -> Symbols.dns
-    Destination.Network -> Symbols.hub
-    Destination.Settings -> Symbols.settings
+    Tab.Home -> Symbols.dashboard
+    Tab.Servers -> Symbols.dns
+    Tab.Network -> Symbols.hub
+    Tab.Settings -> Symbols.settings
 }
 
 fun Destination.label(s: AppStrings): String = when (this) {
-    Destination.Dashboard -> s.navDashboard
-    Destination.Servers -> s.navServers
-    Destination.Network -> s.navNetwork
-    Destination.Settings -> s.navSettings
+    Tab.Home -> s.navDashboard
+    Tab.Servers -> s.navServers
+    Tab.Network -> s.navNetwork
+    Tab.Settings -> s.navSettings
 }
 
+/**
+ * The application chrome.
+ *
+ * Changes from the previous version:
+ *  - The window class is measured, not assumed. `expanded` used to be hardcoded false at
+ *    the call site, so the navigation rail existed but could never appear on a tablet.
+ *  - The navigation bar is flat. It was clipped to 20 dp top corners, which is not part of
+ *    the component and produced a floating slab above the system bar.
+ *  - The top bar carries a single title line. A second subtitle line inside a small top
+ *    app bar is not the component's layout; supporting copy belongs to the screen.
+ *  - The new-server action uses the real FAB / ExtendedFAB instead of a Row inside a FAB.
+ */
 @Composable
 fun AppShell(
     selected: Destination,
     onSelect: (Destination) -> Unit,
-    expanded: Boolean,
     title: String,
-    subtitle: String? = null,
+    modifier: Modifier = Modifier,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: (@Composable () -> Unit)? = null,
     floatingAction: (@Composable () -> Unit)? = null,
+    snackbarHost: (@Composable () -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
 
-    val bar: @Composable () -> Unit = {
-        TopAppBar(
-            title = {
-                Column {
-                    Text(title, style = MaterialTheme.typography.titleLarge)
-                    if (subtitle != null) {
-                        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                    }
-                }
-            },
-            navigationIcon = { if (navigationIcon != null) navigationIcon() },
-            actions = { if (actions != null) actions() },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = scheme.surface,
-                titleContentColor = scheme.onSurface,
-            ),
-        )
-    }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val window = WindowClass.forWidth(maxWidth.value.toInt())
+        CompositionLocalProvider(LocalWindowClass provides window) {
+            val bar: @Composable () -> Unit = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.titleLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    navigationIcon = { if (navigationIcon != null) navigationIcon() },
+                    actions = { if (actions != null) actions() },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = scheme.surface,
+                        titleContentColor = scheme.onSurface,
+                        navigationIconContentColor = scheme.onSurface,
+                        actionIconContentColor = scheme.onSurfaceVariant,
+                    ),
+                )
+            }
 
-    if (expanded) {
-        Row(Modifier.fillMaxSize().background(scheme.surface)) {
-            NavigationRail(
-                containerColor = scheme.surfaceContainerLow,
-                contentColor = scheme.onSurfaceVariant,
-                header = {
-                    Spacer(Modifier.height(12.dp))
-                    Surface(
-                        color = scheme.primaryContainer,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.width(44.dp).height(44.dp),
+            if (window.useRail) {
+                Row(Modifier.fillMaxSize()) {
+                    NavigationRail(
+                        containerColor = scheme.surface,
+                        contentColor = scheme.onSurfaceVariant,
+                        header = { Spacer(Modifier.height(Spacing.lg)) },
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Symbol(Symbols.rocketLaunch, size = 22.dp, tint = scheme.onPrimaryContainer)
+                        Destination.entries.forEach { destination ->
+                            val active = destination == selected
+                            NavigationRailItem(
+                                selected = active,
+                                onClick = { onSelect(destination) },
+                                icon = { Symbol(destination.glyph(), size = IconSize.standard, filled = active) },
+                                label = { Text(destination.label(s), style = MaterialTheme.typography.labelMedium, maxLines = 1) },
+                            )
                         }
                     }
-                    Spacer(Modifier.height(20.dp))
-                },
-            ) {
-                Destination.entries.forEach { destination ->
-                    NavigationRailItem(
-                        selected = destination == selected,
-                        onClick = { onSelect(destination) },
-                        icon = { Symbol(destination.glyph(), size = 24.dp) },
-                        label = { Text(destination.label(s), style = MaterialTheme.typography.labelMedium) },
+                    Scaffold(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        containerColor = scheme.surface,
+                        topBar = bar,
+                        floatingActionButton = { if (floatingAction != null) floatingAction() },
+                        snackbarHost = { if (snackbarHost != null) snackbarHost() },
+                        content = { padding -> content(padding) },
                     )
                 }
-            }
-            Scaffold(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                containerColor = scheme.surface,
-                topBar = bar,
-                floatingActionButton = { if (floatingAction != null) floatingAction() },
-                content = { padding ->
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(padding),
-                        contentAlignment = Alignment.TopCenter,
-                    ) {
-                        Box(Modifier.widthIn(max = 1040.dp).fillMaxHeight()) {
-                            content(PaddingValues(0.dp))
+            } else {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = scheme.surface,
+                    topBar = bar,
+                    bottomBar = {
+                        NavigationBar(
+                            containerColor = scheme.surfaceContainer,
+                            contentColor = scheme.onSurfaceVariant,
+                            tonalElevation = 0.dp,
+                        ) {
+                            Destination.entries.forEach { destination ->
+                                val active = destination == selected
+                                NavigationBarItem(
+                                    selected = active,
+                                    onClick = { onSelect(destination) },
+                                    icon = { Symbol(destination.glyph(), size = IconSize.standard, filled = active) },
+                                    label = {
+                                        Text(
+                                            destination.label(s),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                )
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                    floatingActionButton = { if (floatingAction != null) floatingAction() },
+                    snackbarHost = { if (snackbarHost != null) snackbarHost() },
+                    content = { padding -> content(padding) },
+                )
+            }
         }
-    } else {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = scheme.surface,
-            topBar = bar,
-            bottomBar = {
-                NavigationBar(
-                    containerColor = scheme.surfaceContainer,
-                    contentColor = scheme.onSurfaceVariant,
-                    tonalElevation = 0.dp,
-                    modifier = Modifier.clip(CornerRadius.barTop),
-                ) {
-                    Destination.entries.forEach { destination ->
-                        val active = destination == selected
-                        NavigationBarItem(
-                            selected = active,
-                            onClick = { onSelect(destination) },
-                            icon = { Symbol(destination.glyph(), size = 24.dp, filled = active) },
-                            label = { Text(destination.label(s), style = MaterialTheme.typography.labelMedium, maxLines = 1) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = scheme.onSecondaryContainer,
-                                selectedTextColor = scheme.onSurface,
-                                indicatorColor = scheme.secondaryContainer,
-                                unselectedIconColor = scheme.onSurfaceVariant,
-                                unselectedTextColor = scheme.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
-            },
-            floatingActionButton = { if (floatingAction != null) floatingAction() },
-            content = content,
-        )
     }
 }
 
+/**
+ * The create action. Compact windows get the standard square-ish FAB; wider windows get
+ * the extended form, which is what the Material 3 guidance recommends when there is room
+ * for the label.
+ */
 @Composable
-fun NewServerFab(onClick: () -> Unit, extended: Boolean = false) {
+fun NewServerFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val s = LocalStrings.current
-    FloatingActionButton(
-        onClick = onClick,
-        shape = CornerRadius.largeIncreased,
-        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp),
-        containerColor = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    ) {
-        Row(
-            Modifier.padding(horizontal = if (extended) 20.dp else 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+    val window = LocalWindowClass.current
+    if (window == WindowClass.Compact) {
+        FloatingActionButton(
+            onClick = onClick,
+            modifier = modifier,
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ) {
-            Symbol(Symbols.add, size = 24.dp)
-            if (extended) Text(s.newServer, style = MaterialTheme.typography.labelLarge)
+            Symbol(Symbols.add, size = IconSize.standard)
         }
+    } else {
+        ExtendedFloatingActionButton(
+            onClick = onClick,
+            modifier = modifier,
+            icon = { Symbol(Symbols.add, size = IconSize.standard) },
+            text = { Text(s.newServer, style = MaterialTheme.typography.labelLarge) },
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
     }
 }
 
 @Composable
 fun BackIcon(onClick: () -> Unit) {
     IconButton(onClick = onClick) {
-        Symbol(Symbols.arrowBack, size = 22.dp)
+        Symbol(Symbols.arrowBack, size = IconSize.standard)
+    }
+}
+
+/** A top-bar action with the standard icon size and a label for assistive tech. */
+@Composable
+fun BarAction(glyph: String, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Symbol(glyph, size = IconSize.standard, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

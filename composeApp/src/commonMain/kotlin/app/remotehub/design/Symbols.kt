@@ -1,6 +1,7 @@
 package app.remotehub.design
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -63,9 +64,11 @@ object Symbols {
     const val devices: String = "\ue1b1"
     const val dns: String = "\ue875"
     const val download: String = "\ue171"
+    const val dragClick: String = "\uf71f"
     const val edit: String = "\ue150"
     const val encrypted: String = "\ue593"
     const val error: String = "\ue000"
+    const val expandLess: String = "\ue5ce"
     const val expandMore: String = "\ue5cf"
     const val filterList: String = "\ue152"
     const val fingerprint: String = "\ue90d"
@@ -85,6 +88,7 @@ object Symbols {
     const val keyboardAlt: String = "\uf028"
     const val lan: String = "\ueb2f"
     const val language: String = "\ue894"
+    const val leftClick: String = "\uf718"
     const val lightMode: String = "\ue518"
     const val link: String = "\ue157"
     const val linkOff: String = "\ue16f"
@@ -97,9 +101,6 @@ object Symbols {
     const val monitor: String = "\uef5b"
     const val moreVert: String = "\ue5d4"
     const val mouse: String = "\ue323"
-    const val rightClick: String = "\uf706"
-    const val leftClick: String = "\uf718"
-    const val dragClick: String = "\uf71f"
     const val networkCheck: String = "\ue640"
     const val notifications: String = "\ue7f4"
     const val openInFull: String = "\uf1ce"
@@ -115,10 +116,13 @@ object Symbols {
     const val powerSettingsNew: String = "\ue8ac"
     const val public: String = "\ue80b"
     const val qrCode2: String = "\ue00a"
+    const val radioButtonUnchecked: String = "\ue836"
     const val refresh: String = "\ue5d5"
+    const val remove: String = "\ue15b"
     const val replay: String = "\ue042"
     const val restartAlt: String = "\uf053"
     const val restore: String = "\ue28e"
+    const val rightClick: String = "\uf706"
     const val rocketLaunch: String = "\ueb9b"
     const val router: String = "\ue328"
     const val save: String = "\ue161"
@@ -188,16 +192,16 @@ fun Symbol(
 }
 
 /**
- * An icon inside an expressive container. The container shape is chosen by the
- * caller so a list of rows reads as a set of distinct marks rather than a column of
- * identical circles; selection morphs the container instead of recolouring it.
+ * An icon in a tonal container. The default is a plain circle: a list of rows is a set
+ * of peers, so giving each row a different decorative outline (cookie, clover, star)
+ * encoded meaning that did not exist and made the list look ornamental.
  */
 @Composable
 fun IconBadge(
     glyph: String,
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
-    shape: Shape = ExpressiveShapes.cookie6,
+    shape: Shape = CircleShape,
     container: Color = MaterialTheme.colorScheme.secondaryContainer,
     content: Color = MaterialTheme.colorScheme.onSecondaryContainer,
     filled: Boolean = false,

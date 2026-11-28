@@ -32,7 +32,7 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.remotehub.design.CornerRadius
-import app.remotehub.design.ExpressiveShapes
+import app.remotehub.design.Spacing
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
 import app.remotehub.domain.ServerSession
@@ -110,8 +110,8 @@ fun RemoteContent(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.widthIn(max = 320.dp).padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.lg),
+                    modifier = Modifier.widthIn(max = 320.dp).padding(Spacing.xl),
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(76.dp)) {
                         CircularProgressIndicator(
@@ -134,7 +134,7 @@ fun RemoteContent(
                         color = ChromeMuted,
                         textAlign = TextAlign.Center,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         SoftTag(metrics.resolutionLabel)
                         SoftTag("TLS · NLA")
                     }
@@ -146,13 +146,13 @@ fun RemoteContent(
         AnimatedVisibility(visible = !fullscreen, enter = fadeIn(), exit = fadeOut()) {
             Surface(color = Chrome.copy(alpha = 0.94f), contentColor = ChromeText) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                 ) {
                     Surface(
                         onClick = onDisconnect,
-                        shape = ExpressiveShapes.circle,
+                        shape = androidx.compose.foundation.shape.CircleShape,
                         color = ChromeHigh,
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -171,7 +171,7 @@ fun RemoteContent(
                     }
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             MetricPill("${metrics.latencyMillis}", "ms", metrics.latencyMillis in 1..220)
@@ -190,44 +190,42 @@ fun RemoteContent(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            Surface(color = Chrome.copy(alpha = 0.96f), shape = CornerRadius.barTop, contentColor = ChromeText) {
+            Surface(color = Chrome.copy(alpha = 0.96f), shape = MaterialTheme.shapes.large, contentColor = ChromeText) {
                 // Two rows of three. Six tools in one row squeezed every label to
                 // ~100px on a phone and truncated "Ctrl+Alt+Del".
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RemoteTool(Symbols.keyboard, s.keyboard, onKeyboard, Modifier.weight(1f), ExpressiveShapes.cookie6)
+                        RemoteTool(Symbols.keyboard, s.keyboard, onKeyboard, Modifier.weight(1f))
                         RemoteTool(
                             Symbols.rightClick,
                             s.rightClick,
                             onRightClick,
                             Modifier.weight(1f),
-                            ExpressiveShapes.diamond,
                             active = rightClickArmed,
                         )
-                        RemoteTool(Symbols.contentCopy, s.clipboard, onClipboard, Modifier.weight(1f), ExpressiveShapes.clover4)
+                        RemoteTool(Symbols.contentCopy, s.clipboard, onClipboard, Modifier.weight(1f))
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RemoteTool(Symbols.cable, s.ctrlAltDel, onCtrlAltDel, Modifier.weight(1f), ExpressiveShapes.gem)
+                        RemoteTool(Symbols.cable, s.ctrlAltDel, onCtrlAltDel, Modifier.weight(1f))
                         RemoteTool(
                             if (metrics.trackpadMode) Symbols.mouse else Symbols.touchApp,
                             if (metrics.trackpadMode) s.trackpadMode else s.touchMode,
                             onToggleInputMode,
                             Modifier.weight(1f),
-                            ExpressiveShapes.sunny,
                             active = metrics.trackpadMode,
                         )
-                        RemoteTool(Symbols.fullscreen, s.fullscreen, onFullscreen, Modifier.weight(1f), ExpressiveShapes.pentagon)
+                        RemoteTool(Symbols.fullscreen, s.fullscreen, onFullscreen, Modifier.weight(1f))
                     }
                 }
             }
@@ -237,9 +235,9 @@ fun RemoteContent(
         if (fullscreen) {
             Surface(
                 onClick = onFullscreen,
-                shape = CornerRadius.full,
+                shape = androidx.compose.foundation.shape.CircleShape,
                 color = Chrome.copy(alpha = 0.7f),
-                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(40.dp),
+                modifier = Modifier.align(Alignment.TopEnd).padding(Spacing.md).size(40.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Symbol(Symbols.fullscreenExit, size = 20.dp, tint = ChromeText)
@@ -259,7 +257,7 @@ private fun MetricPill(value: String, unit: String, healthy: Boolean) {
         Text(
             "$value $unit",
             style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr),
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs),
             maxLines = 1,
         )
     }
@@ -271,7 +269,7 @@ private fun SoftTag(text: String) {
         Text(
             text,
             style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr),
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
         )
     }
 }
@@ -282,27 +280,22 @@ private fun RemoteTool(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    badge: androidx.compose.ui.graphics.Shape = ExpressiveShapes.cookie6,
     active: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
         modifier = modifier.height(64.dp),
-        shape = CornerRadius.largeIncreased,
+        shape = MaterialTheme.shapes.small,
         color = if (active) scheme.primaryContainer else ChromeHigh,
         contentColor = if (active) scheme.onPrimaryContainer else ChromeText,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+            modifier = Modifier.padding(vertical = Spacing.sm),
         ) {
-            Surface(shape = badge, color = Color.Transparent) {
-                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-                    Symbol(glyph, size = 20.dp, filled = active)
-                }
-            }
+            Symbol(glyph, size = app.remotehub.design.IconSize.standard, filled = active)
             Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }

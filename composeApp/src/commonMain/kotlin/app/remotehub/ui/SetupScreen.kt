@@ -1,52 +1,52 @@
 package app.remotehub.ui
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.remotehub.app.AppState
 import app.remotehub.app.SetupItem
-import app.remotehub.design.ExpressiveShapes
-import app.remotehub.design.InfoRow
-import app.remotehub.design.NoticeBanner
-import app.remotehub.design.Panel
-import app.remotehub.design.SectionTitle
-import app.remotehub.design.SetupRow
-import app.remotehub.design.StatePill
+import app.remotehub.design.DetailRow
+import app.remotehub.design.ExpandableHelp
+import app.remotehub.design.IconSize
+import app.remotehub.design.InlineMessage
+import app.remotehub.design.MessageTone
+import app.remotehub.design.label
+import app.remotehub.design.NavigationRow
+import app.remotehub.design.PrimaryAction
+import app.remotehub.design.RowDivider
+import app.remotehub.design.ScreenContent
+import app.remotehub.design.Section
+import app.remotehub.design.Spacing
 import app.remotehub.design.Symbol
 import app.remotehub.design.Symbols
-import app.remotehub.design.TimeMeter
-import app.remotehub.design.WarningBanner
+import app.remotehub.design.TextAction
+import app.remotehub.design.TonalAction
+import app.remotehub.design.ltrStyle
 import app.remotehub.domain.NetworkState
 import app.remotehub.domain.ServerState
 import app.remotehub.i18n.LocalStrings
@@ -61,6 +61,17 @@ const val CREATE_TOKEN_URL =
 /** Tailscale's key panel. */
 const val TAILSCALE_KEYS_URL = "https://login.tailscale.com/admin/settings/keys"
 
+/**
+ * Setup: connect the two services the app needs, then create a server.
+ *
+ * The previous screen put a status row, an explanation paragraph, a link button, three
+ * numbered instructions, a masked field and a submit button inside one rounded card, and
+ * repeated the whole block for the second service. Both cards were taller than a phone
+ * screen, so the primary action was never visible while reading the instructions.
+ *
+ * Now: a progress header, one flat section per service, and the instructions collapsed
+ * behind a disclosure. The create action is the only filled button on the screen.
+ */
 @Composable
 fun SetupContent(
     state: AppState,
@@ -78,235 +89,269 @@ fun SetupContent(
 ) {
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
-    val scroll = rememberScrollState()
-    var githubTop by remember { mutableIntStateOf(0) }
-    var networkTop by remember { mutableIntStateOf(0) }
 
-    // An incomplete checklist sends the user straight to the item that is missing.
-    LaunchedEffect(state.highlightItem) {
-        when (state.highlightItem) {
-            SetupItem.GitHub -> scroll.animateScrollTo(githubTop)
-            SetupItem.Network -> scroll.animateScrollTo(networkTop)
-            null -> Unit
-        }
+    // Which service is being connected, so only that button shows a spinner. A single
+    // global `busy` flag used to spin both submit buttons at once.
+    var pending by remember { mutableStateOf<SetupItem?>(null) }
+    var confirmDisconnect by remember { mutableStateOf<SetupItem?>(null) }
+    var helpOpen by remember { mutableStateOf<SetupItem?>(null) }
+    LaunchedEffect(state.busy, state.githubReady, state.networkReady) {
+        if (!state.busy) pending = null
     }
 
-    val highlightShape = MaterialTheme.shapes.large
-    val highlightColor = scheme.primary
+    val connectedCount = (if (state.githubReady) 1 else 0) + (if (state.networkReady) 1 else 0)
+    val live = state.servers.firstOrNull {
+        it.state == ServerState.Ready || it.state == ServerState.Connected ||
+            it.state == ServerState.Expiring || it.state == ServerState.Provisioning
+    }
 
-    fun highlight(item: SetupItem): Modifier =
-        if (state.highlightItem == item) {
-            Modifier.border(2.dp, highlightColor, highlightShape)
-        } else {
-            Modifier
-        }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(scroll)
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        val active = state.servers.firstOrNull {
-            it.state == ServerState.Ready || it.state == ServerState.Connected ||
-                it.state == ServerState.Expiring || it.state == ServerState.Provisioning
-        }
-        if (active != null) {
-            Panel {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(active.name, style = MaterialTheme.typography.titleMedium, color = scheme.onSurface)
-                        Text(
-                            if (active.remainingLabel.isBlank()) s.stateProvisioning else active.remainingLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                    StatePill(active.state)
-                }
-                if (active.remainingFraction > 0f) {
-                    TimeMeter(active.remainingFraction, active.remainingLabel, s.timeRemaining, Modifier.padding(top = 10.dp))
-                }
-                Button(
-                    onClick = { onOpenServer(active.id) },
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                ) {
-                    Text(s.openServer, style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-
-        // Brand header: the app's own mark, one line of intent, no decoration.
+    ScreenContent(modifier) {
+        // Product identity, once, with no container behind the mark.
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {
-            // The mark is stored as a white alpha mask, so it is tinted with the
-            // theme's ink: visible on a light surface and on a dark one alike.
             Image(
                 painter = painterResource(Res.drawable.brand_mark),
                 contentDescription = null,
                 colorFilter = ColorFilter.tint(scheme.onSurface),
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(IconSize.large),
             )
             Column(Modifier.weight(1f)) {
-                Text(s.appName, style = MaterialTheme.typography.titleLarge, color = scheme.onSurface)
+                Text(s.appName, style = MaterialTheme.typography.titleMedium, color = scheme.onSurface)
                 Text(s.brandTagline, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             }
         }
 
-        // ---- item 1: GitHub ----
-        Panel(
-            highlight(SetupItem.GitHub).onGloballyPositioned { githubTop = it.positionInParent().y.toInt() },
-        ) {
-            SetupRow(
-                glyph = Symbols.accountCircle,
-                title = s.setupGithubTitle,
-                statusText = if (state.githubReady) "@${state.account?.login}" else s.setupGithubHint,
-                ok = state.githubReady,
-                shape = ExpressiveShapes.clover4,
+        // A live machine is the most useful thing on this screen; one row, not a card.
+        if (live != null) {
+            NavigationRow(
+                title = live.name,
+                subtitle = live.remainingLabel.ifBlank { s.stateProvisioning },
+                glyph = Symbols.desktopWindows,
+                trailingText = live.state.label(s),
+                onClick = { onOpenServer(live.id) },
             )
-            if (state.githubReady) {
-                OutlinedButton(
-                    onClick = onDisconnectGitHub,
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) { Text(s.disconnect, style = MaterialTheme.typography.labelLarge) }
-            } else {
-                Text(s.setupGithubWhy, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                Button(
-                    onClick = { onOpenUrl(CREATE_TOKEN_URL) },
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                ) {
-                    Symbol(Symbols.openInNew, size = 18.dp)
-                    Text("  " + s.setupMakeToken, style = MaterialTheme.typography.labelLarge)
-                }
-                Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    NumberedStep(1, s.setupTokenStep1)
-                    NumberedStep(2, s.setupTokenStep2)
-                    NumberedStep(3, s.setupTokenStep3)
-                }
-                OutlinedTextField(
-                    value = state.tokenInput,
-                    onValueChange = onTokenChange,
-                    label = { Text(s.setupPasteToken) },
-                    placeholder = { Text("github_pat_…") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    shape = MaterialTheme.shapes.medium,
-                )
-                Button(
-                    onClick = onConnectGitHub,
-                    enabled = state.tokenInput.isNotBlank() && !state.busy,
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                ) {
-                    if (state.busy) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text("  " + s.working, style = MaterialTheme.typography.labelLarge)
-                    } else {
-                        Text(s.connect, style = MaterialTheme.typography.labelLarge)
-                    }
-                }
-                if (state.account != null && state.account.missingScopes.isNotEmpty()) {
-                    WarningBanner(s.scopeMissing, Modifier.padding(top = 10.dp))
-                }
-            }
+            RowDivider()
         }
 
-        // ---- item 2: Tailscale ----
-        Panel(
-            highlight(SetupItem.Network).onGloballyPositioned { networkTop = it.positionInParent().y.toInt() },
-        ) {
-            SetupRow(
-                glyph = Symbols.lan,
-                title = s.setupNetworkTitle,
-                statusText = when {
-                    state.networkReady -> s.setupNetworkDone
-                    state.tailnet.state == NetworkState.Connecting ||
-                        state.tailnet.state == NetworkState.Authenticating -> s.working
-                    state.tailnet.lastError != null -> state.tailnet.lastError!!
-                    else -> s.setupNetworkHint
-                },
-                ok = state.networkReady,
-                shape = ExpressiveShapes.gem,
+        // Connection progress. Two requirements, stated once.
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    s.requiredConnections,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = scheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "$connectedCount ${s.ofLabel} 2",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            LinearProgressIndicator(
+                progress = { connectedCount / 2f },
+                modifier = Modifier.fillMaxWidth().height(Spacing.xs),
+                color = if (state.setupComplete) app.remotehub.design.LocalStatusColors.current.success else scheme.primary,
+                trackColor = scheme.surfaceContainerHighest,
+                strokeCap = StrokeCap.Round,
             )
-            if (state.networkReady) {
-                InfoRow(s.address, state.tailnet.nodeAddress, monospace = true)
-                OutlinedButton(
-                    onClick = onDisconnectNetwork,
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) { Text(s.disconnect, style = MaterialTheme.typography.labelLarge) }
-            } else {
-                Text(s.setupNetworkWhy, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                Button(
-                    onClick = { onOpenUrl(TAILSCALE_KEYS_URL) },
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                ) {
-                    Symbol(Symbols.openInNew, size = 18.dp)
-                    Text("  " + s.setupOpenKeys, style = MaterialTheme.typography.labelLarge)
-                }
-                Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    NumberedStep(1, s.setupKeyStep1)
-                    NumberedStep(2, s.setupKeyStep2)
-                    NumberedStep(3, s.setupKeyStep3)
-                }
-                OutlinedTextField(
-                    value = state.authKeyInput,
-                    onValueChange = onAuthKeyChange,
-                    label = { Text(s.setupPasteKey) },
-                    placeholder = { Text("tskey-auth-…") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    shape = MaterialTheme.shapes.medium,
-                )
-                Button(
-                    onClick = onConnectNetwork,
-                    enabled = state.authKeyInput.isNotBlank() && !state.busy,
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                ) { Text(s.setupSaveConnect, style = MaterialTheme.typography.labelLarge) }
-            }
-        }
-
-        if (state.error != null) {
-            WarningBanner(state.error!!, Modifier.clickable(onClick = onOpenLogs))
-            TextButton(onClick = onOpenLogs, modifier = Modifier.fillMaxWidth()) {
-                Symbol(Symbols.terminal, size = 18.dp)
-                Text("  " + s.viewLogs, style = MaterialTheme.typography.labelLarge)
-            }
-        }
-
-        NoticeBanner(s.setupRiskNote)
-
-        Button(
-            onClick = onCreate,
-            enabled = state.setupComplete && !state.provisioning,
-            shape = MaterialTheme.shapes.large,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Symbol(Symbols.add, size = 20.dp)
-            Text("  " + s.setupCreateServer, style = MaterialTheme.typography.labelLarge)
-        }
-        if (!state.setupComplete) {
             Text(
-                when (state.missingItem) {
+                if (state.setupComplete) s.setupDone
+                else when (state.missingItem) {
                     SetupItem.GitHub -> s.setupMissingGithub
                     SetupItem.Network -> s.setupMissingNetwork
                     null -> ""
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = scheme.onSurfaceVariant,
+            )
+        }
+
+        // ---- service 1: GitHub ----
+        ServiceSection(
+            glyph = Symbols.accountCircle,
+            title = s.githubAccount,
+            ready = state.githubReady,
+            statusText = if (state.githubReady) "@${state.account?.login}" else s.setupGithubHint,
+            explanation = s.setupGithubWhy,
+            helpLabel = s.setupHelpToken,
+            helpOpen = helpOpen == SetupItem.GitHub,
+            onToggleHelp = { helpOpen = if (helpOpen == SetupItem.GitHub) null else SetupItem.GitHub },
+            steps = listOf(s.setupTokenStep1, s.setupTokenStep2, s.setupTokenStep3),
+            openLabel = s.setupMakeToken,
+            onOpen = { onOpenUrl(CREATE_TOKEN_URL) },
+            inputValue = state.tokenInput,
+            onInputChange = onTokenChange,
+            inputLabel = s.setupPasteToken,
+            inputPlaceholder = "github_pat_…",
+            connectLabel = s.connect,
+            connecting = pending == SetupItem.GitHub,
+            onConnect = { pending = SetupItem.GitHub; onConnectGitHub() },
+            onDisconnect = { confirmDisconnect = SetupItem.GitHub },
+        )
+        if (state.account != null && state.account.missingScopes.isNotEmpty()) {
+            InlineMessage(s.scopeMissing, tone = MessageTone.Warning)
+        }
+
+        RowDivider()
+
+        // ---- service 2: private network ----
+        ServiceSection(
+            glyph = Symbols.lan,
+            title = s.privateNetwork,
+            ready = state.networkReady,
+            statusText = when {
+                state.networkReady -> s.setupNetworkDone
+                state.tailnet.state == NetworkState.Connecting ||
+                    state.tailnet.state == NetworkState.Authenticating -> s.working
+                state.tailnet.lastError != null -> state.tailnet.lastError!!
+                else -> s.setupNetworkHint
+            },
+            explanation = s.setupNetworkWhy,
+            helpLabel = s.setupHelpKey,
+            helpOpen = helpOpen == SetupItem.Network,
+            onToggleHelp = { helpOpen = if (helpOpen == SetupItem.Network) null else SetupItem.Network },
+            steps = listOf(s.setupKeyStep1, s.setupKeyStep2, s.setupKeyStep3),
+            openLabel = s.setupOpenKeys,
+            onOpen = { onOpenUrl(TAILSCALE_KEYS_URL) },
+            inputValue = state.authKeyInput,
+            onInputChange = onAuthKeyChange,
+            inputLabel = s.setupPasteKey,
+            inputPlaceholder = "tskey-auth-…",
+            connectLabel = s.setupSaveConnect,
+            connecting = pending == SetupItem.Network,
+            onConnect = { pending = SetupItem.Network; onConnectNetwork() },
+            onDisconnect = { confirmDisconnect = SetupItem.Network },
+            connectedDetail = if (state.networkReady) s.nodeAddress to state.tailnet.nodeAddress else null,
+        )
+
+        if (state.error != null) {
+            InlineMessage(state.error!!, tone = MessageTone.Error, onClick = onOpenLogs)
+            TextAction(s.viewLogs, onOpenLogs, glyph = Symbols.terminal)
+        }
+
+        // The one primary action. Supporting text explains why it is disabled.
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            PrimaryAction(
+                text = s.createServer,
+                onClick = onCreate,
+                glyph = Symbols.add,
+                enabled = state.setupComplete && !state.operation.isActive,
                 modifier = Modifier.fillMaxWidth(),
             )
+            InlineMessage(s.setupRiskNote, tone = MessageTone.Info)
+        }
+    }
+
+    val target = confirmDisconnect
+    if (target != null) {
+        app.remotehub.design.ConfirmDialog(
+            title = s.disconnectConfirmTitle,
+            body = s.disconnectConfirmBody,
+            confirmLabel = s.disconnect,
+            dismissLabel = s.cancel,
+            destructive = true,
+            glyph = Symbols.linkOff,
+            onConfirm = {
+                confirmDisconnect = null
+                if (target == SetupItem.GitHub) onDisconnectGitHub() else onDisconnectNetwork()
+            },
+            onDismiss = { confirmDisconnect = null },
+        )
+    }
+}
+
+/**
+ * One service: status, then either the connected summary or the credential form. The
+ * long instructions live behind a disclosure so the submit button stays reachable.
+ */
+@Composable
+private fun ServiceSection(
+    glyph: String,
+    title: String,
+    ready: Boolean,
+    statusText: String,
+    explanation: String,
+    helpLabel: String,
+    helpOpen: Boolean,
+    onToggleHelp: () -> Unit,
+    steps: List<String>,
+    openLabel: String,
+    onOpen: () -> Unit,
+    inputValue: String,
+    onInputChange: (String) -> Unit,
+    inputLabel: String,
+    inputPlaceholder: String,
+    connectLabel: String,
+    connecting: Boolean,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    connectedDetail: Pair<String, String>? = null,
+) {
+    val s = LocalStrings.current
+    val scheme = MaterialTheme.colorScheme
+    val status = app.remotehub.design.LocalStatusColors.current
+
+    Section(title = title) {
+        ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = {
+                Symbol(
+                    if (ready) Symbols.checkCircle else glyph,
+                    size = IconSize.standard,
+                    tint = if (ready) status.success else scheme.onSurfaceVariant,
+                    filled = ready,
+                )
+            },
+            headlineContent = {
+                Text(
+                    statusText,
+                    style = if (ready && statusText.startsWith("@")) ltrStyle() else MaterialTheme.typography.bodyMedium,
+                    color = if (ready) scheme.onSurface else scheme.onSurfaceVariant,
+                )
+            },
+            trailingContent = if (ready) {
+                { TextAction(s.disconnect, onDisconnect) }
+            } else null,
+        )
+
+        if (ready) {
+            if (connectedDetail != null) {
+                DetailRow(connectedDetail.first, connectedDetail.second, mono = true)
+            }
+        } else {
+            Text(
+                explanation,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = Spacing.sm),
+            )
+            OutlinedTextField(
+                value = inputValue,
+                onValueChange = onInputChange,
+                label = { Text(inputLabel) },
+                placeholder = { Text(inputPlaceholder) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.extraSmall,
+            )
+            Spacer(Modifier.height(Spacing.sm))
+            PrimaryAction(
+                text = if (connecting) s.working else connectLabel,
+                onClick = onConnect,
+                enabled = inputValue.isNotBlank(),
+                loading = connecting,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ExpandableHelp(helpLabel, helpOpen, onToggleHelp) {
+                steps.forEachIndexed { index, text -> NumberedStep(index + 1, text) }
+                TonalAction(openLabel, onOpen, glyph = Symbols.openInNew)
+            }
         }
     }
 }
@@ -314,21 +359,12 @@ fun SetupContent(
 @Composable
 internal fun NumberedStep(index: Int, text: String) {
     val scheme = MaterialTheme.colorScheme
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-        Surface(
-            color = scheme.secondaryContainer,
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.size(22.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    index.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = scheme.onSecondaryContainer,
-                )
-            }
-        }
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.Top) {
+        Text(
+            "$index.",
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.primary,
+        )
         Text(
             text,
             style = MaterialTheme.typography.bodySmall,

@@ -7,7 +7,12 @@ import app.remotehub.domain.ServerSession
 import app.remotehub.domain.TailnetStatus
 import app.remotehub.server.SessionWorkflow
 
-/** The linear path a new user walks: checklist, create, progress, detail, remote. */
+/**
+ * The legacy screen vocabulary, kept as a derived view of [NavState].
+ *
+ * Screens read this; nothing writes it any more. Navigation is expressed as routes so a
+ * destination can carry its own payload and live in a per-tab back stack.
+ */
 enum class AppScreen { Setup, Create, Progress, Detail, Remote, Servers, Network, Settings, Guide, Logs }
 
 /** The two things that must be real before a server can be created. */
@@ -18,9 +23,21 @@ data class CreateForm(
     val durationMinutes: Int = SessionWorkflow.DEFAULT_MINUTES,
 )
 
+/** One transient message for the snackbar host. Sequence makes repeats distinguishable. */
+data class UiMessage(
+    val seq: Long,
+    val text: String,
+    val isError: Boolean = false,
+    val actionLabel: String? = null,
+)
+
 data class AppState(
-    val screen: AppScreen = AppScreen.Setup,
+    /** Where the user is. Owns a back stack per tab; see [NavState]. */
+    val nav: NavState = NavState(),
     val guideId: String? = null,
+
+    /** Creating a server, as a lifecycle that outlives every screen. */
+    val operation: ProvisionOperation = ProvisionOperation(),
 
     // setup
     val tokenInput: String = "",
@@ -37,11 +54,8 @@ data class AppState(
         lastError = null,
     ),
 
-    // create + progress
+    // create
     val form: CreateForm = CreateForm(),
-    val provisioning: Boolean = false,
-    val steps: List<ProvisionStep> = emptyList(),
-    val progressLog: List<String> = emptyList(),
     val activeServerId: String? = null,
 
     // detail + remote
@@ -82,10 +96,33 @@ data class AppState(
     // transient
     val busy: Boolean = false,
     val error: String? = null,
-    val toast: String? = null,
+    val message: UiMessage? = null,
     val highlightItem: SetupItem? = null,
     val appVersion: String = "1.1.0",
 ) {
+    /** Derived, never stored: the route is the truth. */
+    val screen: AppScreen
+        get() = when (val route = nav.route) {
+            Route.Setup -> AppScreen.Setup
+            Route.Create -> AppScreen.Create
+            Route.Progress -> AppScreen.Progress
+            Route.Servers -> AppScreen.Servers
+            Route.Network -> AppScreen.Network
+            Route.Settings -> AppScreen.Settings
+            Route.Logs -> AppScreen.Logs
+            is Route.Detail -> AppScreen.Detail
+            is Route.Guide -> AppScreen.Guide
+            is Route.Remote -> AppScreen.Remote
+        }
+
+    val tab: Tab get() = nav.tab
+
+    // Compatibility views over the operation, so a screen that has not been migrated yet
+    // still renders the live values instead of a stale copy.
+    val provisioning: Boolean get() = operation.isActive
+    val steps: List<ProvisionStep> get() = operation.steps
+    val progressLog: List<String> get() = operation.log
+
     val githubReady: Boolean get() = account != null && account.missingScopes.isEmpty()
     val networkReady: Boolean get() = tailnet.state == NetworkState.Online
     val setupComplete: Boolean get() = githubReady && networkReady
@@ -98,6 +135,24 @@ data class AppState(
         }
 
     val activeServer: ServerSession? get() = servers.firstOrNull { it.id == activeServerId }
+
+    /** Navigate by pushing a route onto the current tab's stack. */
+    fun at(route: Route): AppState = copy(nav = nav.push(route))
+
+    /** Navigate by replacing the current entry, for a step that supersedes it. */
+    fun atTop(route: Route): AppState = copy(nav = nav.replaceTop(route))
+
+    fun selectTab(next: Tab): AppState = copy(nav = nav.selectTab(next))
+
+    /**
+     * Routes that address a server keep working across a restart because the id is in the
+     * route, but the detail screen also reads [activeServerId]; keep them in step.
+     */
+    fun focusedOn(serverId: String?): AppState = when (val route = nav.route) {
+        is Route.Detail -> copy(activeServerId = route.serverId)
+        is Route.Remote -> copy(activeServerId = route.serverId)
+        else -> copy(activeServerId = serverId)
+    }
 }
 
 sealed interface SideEffect {

@@ -2,6 +2,7 @@ package app.remotehub.tools
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -14,9 +15,13 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import app.remotehub.app.AppScreen
 import app.remotehub.app.AppState
 import app.remotehub.app.CreateForm
+import app.remotehub.app.NavState
+import app.remotehub.app.ProvisionOperation
+import app.remotehub.app.ProvisionPhase
+import app.remotehub.app.Route
+import app.remotehub.app.Tab
 import app.remotehub.design.RemoteHubTheme
 import app.remotehub.domain.AuthMethod
 import app.remotehub.domain.BackupRecord
@@ -35,21 +40,22 @@ import app.remotehub.i18n.stringsFor
 import app.remotehub.ui.AppShell
 import app.remotehub.ui.BackIcon
 import app.remotehub.ui.CreateContent
-import app.remotehub.ui.Destination
 import app.remotehub.ui.GuideContent
 import app.remotehub.ui.LogsContent
 import app.remotehub.ui.NetworkContent
 import app.remotehub.ui.ProgressContent
 import app.remotehub.ui.RemoteContent
-import app.remotehub.ui.ServersContent
-import app.remotehub.ui.TailnetDevice
 import app.remotehub.ui.RemoteMetrics
+import app.remotehub.ui.ServersContent
 import app.remotehub.ui.SessionDetailContent
 import app.remotehub.ui.SettingsContent
 import app.remotehub.ui.SetupContent
+import app.remotehub.ui.TailnetDevice
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.skia.EncodedImageFormat
+
+// --------------------------------------------------------------------------- fixtures
 
 private val account = GitHubAccount(
     login = "r4chan842",
@@ -62,13 +68,23 @@ private val account = GitHubAccount(
 
 private val onlineTailnet = TailnetStatus(
     state = NetworkState.Online,
-    tailnetName = "tailnet-8f21.ts.net",
-    nodeName = "remotehub-phone",
-    nodeAddress = "100.94.12.7",
+    tailnetName = "r4chan842.github",
+    nodeName = "remotehub-phone.tail612f7d.ts.net",
+    nodeAddress = "100.67.232.80",
     relayLabel = "DERP · fra",
     latencyMillis = 38,
     transportLabel = "userspace",
     lastError = null,
+)
+
+private val offlineTailnet = onlineTailnet.copy(
+    state = NetworkState.Offline,
+    nodeAddress = "",
+    tailnetName = "",
+    nodeName = "",
+    relayLabel = "",
+    latencyMillis = 0,
+    lastError = "tailnet login: invalid key",
 )
 
 private val spec = ServerSpec(4, 16, 14, "Windows Server 2025 Datacenter", "github-runner", "GitHub Actions")
@@ -76,13 +92,13 @@ private val spec = ServerSpec(4, 16, 14, "Windows Server 2025 Datacenter", "gith
 private val readyServer = ServerSession(
     id = "windows-demo-a91f4c",
     name = "windows-desktop",
-    state = ServerState.Expiring,
+    state = ServerState.Ready,
     spec = spec,
-    connection = ConnectionInfo("100.94.12.41", 3389, "rhuser", "Xk7mQ2vLp9tR4nB8wZ1cD6yF", "9A:41:C7:2E"),
+    connection = ConnectionInfo("100.64.34.100", 3389, "rhuser", "Xk7mQ2vLp9tR4nB8wZ1cD6yF", "9A:41:C7:2E"),
     steps = emptyList(),
     uptimeLabel = "5h 36m",
-    remainingLabel = "00:23:41",
-    remainingFraction = 0.11f,
+    remainingLabel = "02:23:41",
+    remainingFraction = 0.42f,
     warningThresholdMinutes = 15,
     workflowRunNumber = 128,
     workflowRunUrl = "https://github.com/r4chan842/remote-hub-sessions/actions/runs/128",
@@ -98,14 +114,53 @@ private val readyServer = ServerSession(
     durationMinutes = 360,
 )
 
-private val progressSteps = listOf(
-    ProvisionStep("account", StepStatus.Done, "@r4chan842", 1200),
-    ProvisionStep("repo", StepStatus.Done, "r4chan842/remote-hub-sessions", 2400),
-    ProvisionStep("secrets", StepStatus.Done, "3 secrets · sealed box", 1800),
-    ProvisionStep("dispatch", StepStatus.Done, "run #129", 900),
-    ProvisionStep("machine", StepStatus.Running, "4. Create the desktop account", null),
-    ProvisionStep("network", StepStatus.Pending, null, null),
-    ProvisionStep("ready", StepStatus.Pending, null, null),
+private val stepIds = listOf("account", "repo", "secrets", "dispatch", "machine", "network", "ready")
+
+private fun steps(runningIndex: Int, failedIndex: Int = -1): List<ProvisionStep> =
+    stepIds.mapIndexed { index, id ->
+        ProvisionStep(
+            id = id,
+            status = when {
+                index == failedIndex -> StepStatus.Failed
+                index < runningIndex -> StepStatus.Done
+                index == runningIndex -> StepStatus.Running
+                else -> StepStatus.Pending
+            },
+            detail = when {
+                index == failedIndex -> "runner exited with code 1"
+                id == "account" && index < runningIndex -> "@r4chan842"
+                id == "repo" && index < runningIndex -> "r4chan842/remote-hub-sessions"
+                id == "dispatch" && index <= runningIndex -> "run #129"
+                else -> null
+            },
+            elapsedMillis = if (index < runningIndex) 1200L * (index + 1) else null,
+        )
+    }
+
+private val runningOperation = ProvisionOperation(
+    phase = ProvisionPhase.RunningWorkflow,
+    serverName = "windows-desktop",
+    durationMinutes = 360,
+    steps = steps(4),
+    log = listOf("repository ready", "3 secrets sealed", "run #129 dispatched", "2. Enable Remote Desktop"),
+    startedAtEpochMs = 1_764_000_000_000,
+    attempt = 1,
+)
+
+private val failedOperation = runningOperation.copy(
+    phase = ProvisionPhase.Failed,
+    steps = steps(4, failedIndex = 4),
+    errorMessage = "The runner stopped before Remote Desktop was enabled.",
+    errorCode = "workflow",
+    finishedAtEpochMs = 1_764_000_600_000,
+)
+
+private val completedOperation = runningOperation.copy(
+    phase = ProvisionPhase.Completed,
+    steps = steps(7),
+    serverId = readyServer.id,
+    runNumber = 129,
+    finishedAtEpochMs = 1_764_000_900_000,
 )
 
 private val logSample = listOf(
@@ -118,54 +173,36 @@ private val logSample = listOf(
     app.remotehub.app.LogEntry(1, 1_760_000_001_000, app.remotehub.app.LogLevel.Info, "app", "RemoteHub started"),
 )
 
-private val emptySetup = AppState(screen = AppScreen.Setup)
-
-private val readySetup = AppState(
-    screen = AppScreen.Setup,
-    account = account,
-    tailnet = onlineTailnet,
-)
-
-private val createState = AppState(
-    screen = AppScreen.Create,
-    account = account,
-    tailnet = onlineTailnet,
-    form = CreateForm(name = "windows-desktop", durationMinutes = 360),
-)
-
-private val progressState = AppState(
-    screen = AppScreen.Progress,
-    account = account,
-    tailnet = onlineTailnet,
-    form = CreateForm(name = "windows-desktop", durationMinutes = 360),
-    provisioning = true,
-    steps = progressSteps,
-    progressLog = listOf(
-        "repository ready",
-        "3 secrets sealed",
-        "workflow committed",
-        "run #129 dispatched",
-        "1. Validate the request",
-        "2. Enable Remote Desktop",
-    ),
-)
-
-private val detailState = AppState(
-    screen = AppScreen.Detail,
+private fun baseState(route: Route) = AppState(
+    nav = NavState().let { nav ->
+        val withTab = nav.selectTab(route.tab)
+        if (route.isRoot) withTab else withTab.push(route)
+    },
     account = account,
     tailnet = onlineTailnet,
     servers = listOf(readyServer),
     activeServerId = readyServer.id,
 )
 
+private val manyServers = listOf(
+    readyServer.copy(state = ServerState.Connected),
+    readyServer.copy(id = "s2", name = "Windows 11 · build", state = ServerState.Ready),
+    readyServer.copy(id = "s3", name = "Windows Server · test", state = ServerState.Stopped),
+    readyServer.copy(id = "s4", name = "Windows 11 · expired", state = ServerState.Failed),
+    readyServer.copy(id = "s5", name = "qa-runner", state = ServerState.Expiring, remainingFraction = 0.08f, remainingLabel = "00:07:12"),
+    readyServer.copy(id = "s6", name = "staging-desktop", state = ServerState.Provisioning),
+)
+
+// --------------------------------------------------------------------------- variants
+
 private data class Variant(val locale: String, val dark: Boolean, val expanded: Boolean) {
-    fun suffix(): String = "$locale-${if (dark) "dark" else "light"}-${if (expanded) "desktop" else "phone"}"
+    fun suffix(): String = "$locale-${if (dark) "dark" else "light"}-${if (expanded) "expanded" else "compact"}"
 }
 
 private val variants = listOf(
     Variant("fa", true, false),
-    Variant("fa", true, true),
     Variant("en", false, false),
+    Variant("ar", true, false),
     Variant("en", false, true),
 )
 
@@ -185,66 +222,98 @@ private fun Frame(strings: AppStrings, dark: Boolean, content: @Composable () ->
 private fun ShellFrame(
     strings: AppStrings,
     dark: Boolean,
-    expanded: Boolean,
     title: String,
-    subtitle: String? = null,
+    tab: Tab,
     back: Boolean = false,
-    destination: Destination = Destination.Dashboard,
+    fab: Boolean = false,
     content: @Composable (Modifier) -> Unit,
 ) {
     Frame(strings, dark) {
         AppShell(
-            selected = destination,
+            selected = tab,
             onSelect = {},
-            expanded = expanded,
             title = title,
-            subtitle = subtitle,
             navigationIcon = if (back) { { BackIcon(onClick = {}) } } else null,
+            floatingAction = if (fab) { { app.remotehub.ui.NewServerFab(onClick = {}) } } else null,
         ) { padding ->
             content(Modifier.padding(padding))
         }
     }
 }
 
+private val screenNames = listOf(
+    "01-setup-empty",
+    "02-setup-partial",
+    "03-setup-ready",
+    "04-create",
+    "05-progress-running",
+    "06-progress-failed",
+    "07-progress-completed",
+    "08-detail-ready",
+    "09-detail-stopped",
+    "10-detail-no-address",
+    "11-servers-empty",
+    "12-servers-many",
+    "13-settings",
+    "14-guide",
+    "15-logs",
+    "16-network-online",
+    "17-network-offline",
+    "18-remote",
+)
+
 private fun screenContent(name: String, strings: AppStrings, variant: Variant): @Composable () -> Unit = {
-    val expanded = variant.expanded
+    val noPadding = PaddingValues(0.dp)
     when (name) {
-        "01-setup-empty" -> ShellFrame(strings, variant.dark, expanded, strings.setupTitle, strings.setupSubtitle) { m ->
-            SetupContent(emptySetup, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
+        "01-setup-empty" -> ShellFrame(strings, variant.dark, strings.setupTitle, Tab.Home) { m ->
+            SetupContent(AppState(), {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
         }
-        "02-setup-ready" -> ShellFrame(strings, variant.dark, expanded, strings.setupTitle, strings.setupSubtitle) { m ->
-            SetupContent(readySetup, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
+        "02-setup-partial" -> ShellFrame(strings, variant.dark, strings.setupTitle, Tab.Home) { m ->
+            SetupContent(AppState(account = account), {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
         }
-        "03-create" -> ShellFrame(strings, variant.dark, expanded, strings.createTitle, strings.createSubtitle, back = true) { m ->
-            CreateContent(createState, {}, {}, {}, {}, m)
+        "03-setup-ready" -> ShellFrame(strings, variant.dark, strings.setupTitle, Tab.Home) { m ->
+            SetupContent(baseState(Route.Setup), {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, m)
         }
-        "04-progress" -> ShellFrame(strings, variant.dark, expanded, strings.progressTitle, strings.progressSubtitle, back = true) { m ->
-            ProgressContent(progressState, {}, {}, {}, m)
-        }
-        "05-detail" -> ShellFrame(strings, variant.dark, expanded, readyServer.name, back = true) { m ->
-            SessionDetailContent(readyServer, false, false, null, {}, { _, _ -> }, {}, {}, {}, {}, {}, m)
-        }
-        "06-remote" -> Frame(strings, variant.dark) {
-            RemoteContent(
-                server = readyServer.copy(state = ServerState.Connected),
-                metrics = RemoteMetrics(31, 38, 2400, "1600 × 900", true, true),
-                onDisconnect = {},
-                onKeyboard = {},
-                onClipboard = {},
-                onRightClick = {},
-                            onCtrlAltDel = {},
-                onToggleInputMode = {},
-                onFullscreen = {},
-                desktopSurface = { Box(Modifier.fillMaxSize().background(Color(0xFF10233F))) },
+        "04-create" -> ShellFrame(strings, variant.dark, strings.createTitle, Tab.Home, back = true) { m ->
+            CreateContent(
+                baseState(Route.Create).copy(form = CreateForm("windows-desktop", 360)),
+                {}, {}, {}, {}, m,
             )
         }
-        "07-settings" -> ShellFrame(strings, variant.dark, expanded, strings.settingsTitle, back = true) { m ->
+        "05-progress-running" -> ShellFrame(strings, variant.dark, strings.progressTitle, Tab.Home, back = true) { m ->
+            ProgressContent(baseState(Route.Progress).copy(operation = runningOperation), {}, {}, {}, m)
+        }
+        "06-progress-failed" -> ShellFrame(strings, variant.dark, strings.progressTitle, Tab.Home, back = true) { m ->
+            ProgressContent(baseState(Route.Progress).copy(operation = failedOperation), {}, {}, {}, m)
+        }
+        "07-progress-completed" -> ShellFrame(strings, variant.dark, strings.progressTitle, Tab.Home, back = true) { m ->
+            ProgressContent(baseState(Route.Progress).copy(operation = completedOperation), {}, {}, {}, m)
+        }
+        "08-detail-ready" -> ShellFrame(strings, variant.dark, readyServer.name, Tab.Servers, back = true) { m ->
+            SessionDetailContent(readyServer, false, false, null, {}, { _, _ -> }, {}, {}, {}, {}, {}, m)
+        }
+        "09-detail-stopped" -> ShellFrame(strings, variant.dark, readyServer.name, Tab.Servers, back = true) { m ->
+            SessionDetailContent(readyServer.copy(state = ServerState.Stopped), false, false, null, {}, { _, _ -> }, {}, {}, {}, {}, {}, m)
+        }
+        "10-detail-no-address" -> ShellFrame(strings, variant.dark, readyServer.name, Tab.Servers, back = true) { m ->
+            SessionDetailContent(
+                readyServer.copy(state = ServerState.Provisioning, connection = readyServer.connection?.copy(address = "")),
+                false, false, null, {}, { _, _ -> }, {}, {}, {}, {}, {}, m,
+            )
+        }
+        "11-servers-empty" -> ShellFrame(strings, variant.dark, strings.serversTitle, Tab.Servers) { m ->
+            ServersContent(emptyList(), noPadding, {}, {}, {}, {}, m)
+        }
+        "12-servers-many" -> ShellFrame(strings, variant.dark, strings.serversTitle, Tab.Servers, fab = true) { m ->
+            ServersContent(manyServers, noPadding, {}, {}, {}, {}, m)
+        }
+        "13-settings" -> ShellFrame(strings, variant.dark, strings.settingsTitle, Tab.Settings) { m ->
             SettingsContent(0, variant.locale, true, 15, {}, {}, {}, {}, {}, {}, m)
         }
-        "08-guide" -> ShellFrame(strings, variant.dark, expanded, strings.guides, back = true) { m ->
+        "14-guide" -> ShellFrame(strings, variant.dark, strings.guides, Tab.Settings, back = true) { m ->
             GuideContent("github", m)
         }
-        "09-logs" -> ShellFrame(strings, variant.dark, expanded, strings.logsTitle, back = true) { m ->
+        "15-logs" -> ShellFrame(strings, variant.dark, strings.logsTitle, Tab.Settings, back = true) { m ->
             LogsContent(
                 entries = logSample,
                 filter = "all",
@@ -257,20 +326,7 @@ private fun screenContent(name: String, strings: AppStrings, variant: Variant): 
                 modifier = m,
             )
         }
-        "10-servers" -> ShellFrame(strings, variant.dark, expanded, strings.serversTitle, destination = Destination.Servers) { m ->
-            ServersContent(
-                servers = listOf(
-                    readyServer.copy(state = ServerState.Connected),
-                    readyServer.copy(id = "s2", name = "Windows 11 · build", state = ServerState.Ready),
-                    readyServer.copy(id = "s3", name = "Windows Server · test", state = ServerState.Stopped),
-                    readyServer.copy(id = "s4", name = "Windows 11 · expired", state = ServerState.Failed),
-                ),
-                padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                onOpen = {}, onConnect = {}, onRestart = {}, onCreate = {},
-                modifier = m,
-            )
-        }
-        "11-network" -> ShellFrame(strings, variant.dark, expanded, strings.networkScreenTitle, destination = Destination.Network) { m ->
+        "16-network-online" -> ShellFrame(strings, variant.dark, strings.networkScreenTitle, Tab.Network) { m ->
             NetworkContent(
                 tailnet = onlineTailnet,
                 devices = listOf(
@@ -280,20 +336,29 @@ private fun screenContent(name: String, strings: AppStrings, variant: Variant): 
                 deviceVpn = true,
                 vpnBusy = false,
                 vpnInterface = "tun0",
-                padding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                padding = noPadding,
                 onToggleVpn = {}, onConnect = {}, onDisconnect = {}, onCopy = { _, _ -> },
                 modifier = m,
             )
         }
-        "12-remote-fullscreen" -> Frame(strings, variant.dark) {
+        "17-network-offline" -> ShellFrame(strings, variant.dark, strings.networkScreenTitle, Tab.Network) { m ->
+            NetworkContent(
+                tailnet = offlineTailnet,
+                devices = emptyList(),
+                deviceVpn = false,
+                vpnBusy = false,
+                vpnInterface = "",
+                padding = noPadding,
+                onToggleVpn = {}, onConnect = {}, onDisconnect = {}, onCopy = { _, _ -> },
+                modifier = m,
+            )
+        }
+        "18-remote" -> Frame(strings, variant.dark) {
             RemoteContent(
                 server = readyServer.copy(state = ServerState.Connected),
-                metrics = RemoteMetrics(31, 38, 2400, "1600x900", false, false),
+                metrics = RemoteMetrics(31, 58, 2400, "1600 × 900", true, false),
                 onDisconnect = {}, onKeyboard = {}, onClipboard = {}, onRightClick = {},
-                            onCtrlAltDel = {},
-                onToggleInputMode = {}, onFullscreen = {},
-                fullscreen = true,
-                connecting = false,
+                onCtrlAltDel = {}, onToggleInputMode = {}, onFullscreen = {},
                 hostAspectRatio = 16f / 9f,
                 desktopSurface = { Box(Modifier.fillMaxSize().background(Color(0xFF10233F))) },
             )
@@ -328,26 +393,13 @@ private fun render(width: Int, height: Int, density: Float, target: File, conten
 fun main(args: Array<String>) {
     val outDir = File(args.firstOrNull() ?: "build/screens")
     outDir.mkdirs()
-    val names = listOf(
-        "01-setup-empty",
-        "02-setup-ready",
-        "03-create",
-        "04-progress",
-        "05-detail",
-        "06-remote",
-        "07-settings",
-        "08-guide",
-        "09-logs",
-        "10-servers",
-        "11-network",
-        "12-remote-fullscreen",
-    )
     var count = 0
-    for (name in names) {
+    for (name in screenNames) {
         for (variant in variants) {
             val strings = stringsFor(variant.locale)
+            // Compact is a 412x915 dp phone; expanded is a 1280x900 dp tablet window.
             val width = if (variant.expanded) 1920 else 824
-            val height = if (variant.expanded) 1320 else 1830
+            val height = if (variant.expanded) 1350 else 1830
             val density = if (variant.expanded) 1.5f else 2f
             val target = File(outDir, "$name--${variant.suffix()}.png")
             render(width, height, density, target) {
@@ -358,5 +410,5 @@ fun main(args: Array<String>) {
         }
     }
     println("total=$count out=${outDir.absolutePath}")
-    if (count != names.size * variants.size) error("render count mismatch")
+    if (count != screenNames.size * variants.size) error("render count mismatch")
 }

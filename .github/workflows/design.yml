@@ -54,6 +54,7 @@ jobs:
           exit 1
 
       - name: Render every screen from real Compose code
+        # 18 screens x 4 variants (fa/en/ar, light/dark, compact/expanded).
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
@@ -70,7 +71,7 @@ jobs:
           set -euo pipefail
           count=$(find composeApp/build/screens -name '*.png' | wc -l)
           echo "rendered=$count"
-          test "$count" -eq 48
+          test "$count" -eq 72
           find composeApp/build/screens -name '*.png' -size -8k -print | tee /tmp/small.txt
           test ! -s /tmp/small.txt
 

@@ -34,6 +34,11 @@ import app.remotehub.github.StoredServer
 import app.remotehub.i18n.stringsFor
 import app.remotehub.net.TailscaleNode
 import app.remotehub.net.TailscaleVpnService
+import app.remotehub.app.NavState
+import app.remotehub.app.ProvisionPhase
+import app.remotehub.app.Route
+import app.remotehub.app.Tab
+import app.remotehub.app.UiMessage
 import app.remotehub.rdp.RdpKeys
 import app.remotehub.rdp.RdpSession
 import app.remotehub.server.ProvisionEvent
@@ -76,8 +81,6 @@ class SessionController(
     private val metricsCache = mutableMapOf<String, RemoteMetrics>()
     private var provisionJob: Job? = null
 
-    /** Where to return when leaving Settings; a live run always wins. */
-    private var settingsReturn: AppScreen? = null
     private var watchJob: Job? = null
     private var notificationsAllowed = false
     private val alerted = mutableSetOf<String>()
@@ -90,8 +93,10 @@ class SessionController(
             val id = next.activeServerId
             if (id.isNullOrBlank()) store.remove(StoreKeys.LAST_SERVER) else store.put(StoreKeys.LAST_SERVER, id)
         }
-        if (next.screen != state.screen && next.screen != AppScreen.Remote) {
-            store.put(StoreKeys.LAST_SCREEN, next.screen.name)
+        if (next.nav != state.nav) {
+            // The whole stack set is persisted, not just the top screen, so returning to
+            // the app restores each tab exactly as it was left.
+            store.put(StoreKeys.LAST_SCREEN, next.nav.encode())
         }
         state = next
         onState(next)
@@ -100,7 +105,6 @@ class SessionController(
     // ------------------------------------------------------------- diagnostics
 
     /** Where the log screen returns to when it is closed. */
-    private var logsReturnScreen = AppScreen.Setup
 
     private fun currentLogs(): List<LogEntry> = Diagnostics.snapshot(state.logFilter, state.logQuery)
 
@@ -134,18 +138,16 @@ class SessionController(
 
     fun openLogs(filter: String = "all") {
         Diagnostics.pullNative()
-        if (state.screen != AppScreen.Logs) logsReturnScreen = state.screen
         publish(
             state.copy(
-                screen = AppScreen.Logs,
                 logFilter = filter,
                 logs = Diagnostics.snapshot(filter, state.logQuery),
                 environmentReport = Diagnostics.environmentReport(),
-            ),
+            ).at(Route.Logs),
         )
     }
 
-    fun closeLogs() = publish(state.copy(screen = logsReturnScreen, expandedLogSeq = null))
+    fun closeLogs() = publish(state.copy(expandedLogSeq = null).let { it.copy(nav = it.nav.pop() ?: NavState()) })
 
     fun setLogFilter(filter: String) {
         Diagnostics.pullNative()
@@ -180,7 +182,7 @@ class SessionController(
                 logs = emptyList(),
                 crashNotice = null,
                 expandedLogSeq = null,
-                toast = stringsFor(state.localeTag).logsCleared,
+                message = UiMessage(++messageSeq, stringsFor(state.localeTag).logsCleared),
             ),
         )
     }
@@ -241,14 +243,18 @@ class SessionController(
         val lastId = store.get(StoreKeys.LAST_SERVER)
         val lastScreen = store.get(StoreKeys.LAST_SCREEN)
         if (lastId != null && next.servers.any { it.id == lastId }) {
-            val restored = when (lastScreen) {
-                AppScreen.Detail.name, AppScreen.Remote.name -> AppScreen.Detail
-                AppScreen.Progress.name -> AppScreen.Detail
-                else -> AppScreen.Setup
-            }
-            next = next.copy(activeServerId = lastId, screen = restored)
-        } else if (lastScreen == AppScreen.Servers.name && next.servers.isNotEmpty()) {
-            next = next.copy(screen = AppScreen.Servers)
+            // A saved route may address a server that no longer exists; prune first.
+            val saved = NavState.decode(lastScreen).pruneServers(next.servers.map { it.id }.toSet())
+            next = next.copy(nav = saved).focusedOn(lastId)
+        } else {
+            val saved = NavState.decode(lastScreen).pruneServers(next.servers.map { it.id }.toSet())
+            next = next.copy(nav = saved)
+        }
+        // A creation that was in flight when the process died cannot be resumed from the
+        // client: the workflow may or may not still be running. Mark it interrupted rather
+        // than leaving a spinner that never finishes.
+        if (next.operation.isActive) {
+            next = next.copy(operation = next.operation.fail(context.getString(R.string.err_provision), "interrupted", Clock.System.now().toEpochMilliseconds()))
         }
         Diagnostics.info(
             "app",
@@ -662,10 +668,10 @@ class SessionController(
     fun startCreate() {
         val missing = state.missingItem
         if (missing != null) {
-            publish(state.copy(screen = AppScreen.Setup, highlightItem = missing))
+            publish(state.copy(highlightItem = missing).selectTab(Tab.Home).at(Route.Setup))
             return
         }
-        publish(state.copy(screen = AppScreen.Create, error = null))
+        publish(state.copy(error = null).at(Route.Create))
     }
 
     fun setServerName(name: String) = publish(state.copy(form = state.form.copy(name = name)))
@@ -676,12 +682,12 @@ class SessionController(
         val client = github
         val owner = state.account?.login
         if (client == null || owner == null) {
-            publish(state.copy(error = context.getString(R.string.err_github_first), screen = AppScreen.Setup))
+            publish(state.copy(error = context.getString(R.string.err_github_first)).selectTab(Tab.Home).at(Route.Setup))
             return
         }
         val authKey = store.get(StoreKeys.TS_AUTH_KEY)
         if (authKey.isNullOrBlank()) {
-            publish(state.copy(error = context.getString(R.string.err_key_empty), screen = AppScreen.Setup))
+            publish(state.copy(error = context.getString(R.string.err_key_empty)).selectTab(Tab.Home).at(Route.Setup))
             return
         }
         CryptoCheck.run()?.let { problem ->
@@ -697,7 +703,15 @@ class SessionController(
             "provision",
             "creating server name=${form.name} minutes=${form.durationMinutes} repo=${state.repositoryName}",
         )
-        publish(state.copy(screen = AppScreen.Progress, provisioning = true, steps = emptyList(), progressLog = emptyList(), error = null))
+        // Single flight: one creation at a time. start() returns null while an attempt is
+        // in flight, which also covers a restart that is still running.
+        val began = state.operation.start(form.name, form.durationMinutes, Clock.System.now().toEpochMilliseconds())
+        if (began == null) {
+            Diagnostics.warn("provision", "a creation is already running; ignoring the second request")
+            publish(state.at(Route.Progress))
+            return
+        }
+        publish(state.copy(operation = began, error = null).at(Route.Progress))
         provisionJob = scope.launch {
             val provisioner = Provisioner(
                 client = client,
@@ -748,7 +762,11 @@ class SessionController(
                 )
                 publish(
                     state.copy(
-                        provisioning = false,
+                        operation = state.operation.complete(
+                            session.id,
+                            outcome.runNumber,
+                            Clock.System.now().toEpochMilliseconds(),
+                        ),
                         servers = state.servers.filterNot { it.id == session.id } + session,
                         activeServerId = session.id,
                     ),
@@ -757,7 +775,19 @@ class SessionController(
                 resolveEndpoint(session.id)
                 watchRun(session.id)
             }.onFailure { error ->
-                publish(state.copy(provisioning = false))
+                if (error is kotlinx.coroutines.CancellationException) {
+                    publish(state.copy(operation = state.operation.cancel(Clock.System.now().toEpochMilliseconds())))
+                    return@onFailure
+                }
+                publish(
+                    state.copy(
+                        operation = state.operation.fail(
+                            error.message ?: context.getString(R.string.err_provision),
+                            "provision",
+                            Clock.System.now().toEpochMilliseconds(),
+                        ),
+                    ),
+                )
                 fail("provision", error.message ?: context.getString(R.string.err_provision), error)
             }
         }
@@ -765,10 +795,10 @@ class SessionController(
 
     private fun applyProvisionEvent(event: ProvisionEvent) {
         when (event) {
-            is ProvisionEvent.Steps -> publish(state.copy(steps = event.steps))
+            is ProvisionEvent.Steps -> publish(state.copy(operation = state.operation.withSteps(event.steps)))
             is ProvisionEvent.Log -> {
                 Diagnostics.info("provision", event.line)
-                publish(state.copy(progressLog = (state.progressLog + event.line).takeLast(20)))
+                publish(state.copy(operation = state.operation.withLog(event.line)))
             }
             is ProvisionEvent.Ready -> Diagnostics.info("provision", "session endpoint reported ready")
             is ProvisionEvent.Failed -> fail("provision", event.message)
@@ -778,8 +808,16 @@ class SessionController(
     fun cancelProvision() {
         provisionJob?.cancel()
         provisionJob = null
-        publish(state.copy(provisioning = false, screen = AppScreen.Setup))
+        watchJob?.cancel()
+        watchJob = null
+        publish(
+            state.copy(operation = state.operation.cancel(Clock.System.now().toEpochMilliseconds()))
+                .let { it.copy(nav = it.nav.pop() ?: NavState()) },
+        )
     }
+
+    /** Dismiss a finished attempt so the create form is usable again. */
+    fun acknowledgeOperation() = publish(state.copy(operation = state.operation.acknowledge()))
 
     fun retryProvision() = provision()
 
@@ -808,7 +846,15 @@ class SessionController(
         }
         rdpSessions.remove(serverId)?.close()
         scope.launch {
-            publish(state.copy(busy = true, error = null, screen = AppScreen.Progress, activeServerId = serverId))
+            val began = state.operation.start(session.name, session.durationMinutes, Clock.System.now().toEpochMilliseconds())
+            if (began == null) {
+                notifyUser(stringsFor(state.localeTag).operationRunning)
+                return@launch
+            }
+            publish(
+                state.copy(busy = true, error = null, activeServerId = serverId, operation = began)
+                    .at(Route.Progress),
+            )
             Diagnostics.info("session", "re-running workflow run ${session.runId} for ${session.id}")
             runCatching { client.rerun(owner, repo, session.runId) }
                 .onFailure { failure ->
@@ -830,16 +876,18 @@ class SessionController(
             publish(
                 state.copy(
                     busy = false,
-                    provisioning = true,
-                    steps = listOf(
-                        ProvisionStep(
-                            id = "rerun",
-                            status = StepStatus.Running,
-                            detail = "run ${session.runId}",
-                            elapsedMillis = null,
-                        ),
-                    ),
-                    progressLog = listOf("re-running workflow run ${session.runId}"),
+                    operation = state.operation
+                        .withSteps(
+                            listOf(
+                                ProvisionStep(
+                                    id = "dispatch",
+                                    status = StepStatus.Running,
+                                    detail = "run ${session.runId}",
+                                    elapsedMillis = null,
+                                ),
+                            ),
+                        )
+                        .withLog("re-running workflow run ${session.runId}"),
                 ),
             )
             // GitHub needs a moment to open the new attempt; until then the run still
@@ -888,11 +936,26 @@ class SessionController(
                 // The Progress screen reads state.steps, not server.steps. Re-running
                 // an existing session only updated the model, so the screen showed
                 // "running" with no process until the run finished.
-                if (state.activeServerId == serverId) {
+                // The operation is the single source the Progress screen renders, for a
+                // first creation and for a re-run alike.
+                if (state.operation.isActive) {
                     val logLine = "run ${run.runNumber}: ${run.status}" +
                         (run.conclusion?.let { " ($it)" } ?: "")
-                    val log = (state.progressLog + logLine).takeLast(120)
-                    publish(state.copy(steps = steps, progressLog = log, provisioning = !ended))
+                    val advanced = state.operation.withSteps(steps).withLog(logLine)
+                    publish(
+                        state.copy(
+                            operation = when {
+                                !ended -> advanced
+                                run.conclusion == "success" ->
+                                    advanced.complete(serverId, run.runNumber, Clock.System.now().toEpochMilliseconds())
+                                else -> advanced.fail(
+                                    "run ${run.conclusion ?: "failed"}",
+                                    "workflow",
+                                    Clock.System.now().toEpochMilliseconds(),
+                                )
+                            },
+                        ),
+                    )
                 }
                 updateServer(serverId) { current ->
                     current.copy(
@@ -1044,7 +1107,7 @@ class SessionController(
         val session = state.servers.firstOrNull { it.id == serverId } ?: return
         val connection = session.connection
         if (connection == null || connection.address.isBlank()) {
-            publish(state.copy(screen = AppScreen.Remote, activeServerId = serverId, error = null))
+            publish(state.copy(activeServerId = serverId, error = null).at(Route.Remote(serverId)))
             scope.launch {
                 repeat(30) {
                     resolveEndpoint(serverId)
@@ -1065,12 +1128,11 @@ class SessionController(
         scope.launch {
             publish(
                 state.copy(
-                    screen = AppScreen.Remote,
                     activeServerId = serverId,
                     busy = true,
                     remoteConnecting = true,
                     error = null,
-                ),
+                ).at(Route.Remote(serverId)),
             )
             rdpSessions[serverId]?.let {
                 publish(state.copy(busy = false, remoteConnecting = false))
@@ -1159,12 +1221,11 @@ class SessionController(
         if (state.remoteFullscreen) onEffect(SideEffect.Immersive(false))
         publish(
             state.copy(
-                screen = AppScreen.Detail,
                 remoteFullscreen = false,
                 remoteConnecting = false,
                 keyboardVisible = false,
                 rightClickArmed = false,
-            ),
+            ).let { it.copy(nav = it.nav.pop() ?: NavState()) }.focusedOn(serverId),
         )
     }
 
@@ -1229,7 +1290,7 @@ class SessionController(
                 session.pressChord(RdpKeys.LCTRL, 0x2F) // V
             }
         }
-        publish(state.copy(toast = if (sent) context.getString(R.string.clipboard_sent) else context.getString(R.string.clipboard_pending)))
+        notifyUser(if (sent) context.getString(R.string.clipboard_sent) else context.getString(R.string.clipboard_pending))
     }
 
     /**
@@ -1290,7 +1351,7 @@ class SessionController(
                 )
             }
             persistServers()
-            publish(state.copy(screen = AppScreen.Setup))
+            publish(state.selectTab(Tab.Servers).at(Route.Servers))
         }
     }
 
@@ -1343,7 +1404,8 @@ class SessionController(
                 }
                 persistServers()
             }.onSuccess {
-                publish(state.copy(busy = false, toast = context.getString(R.string.backup_stored)))
+                publish(state.copy(busy = false))
+                notifyUser(context.getString(R.string.backup_stored))
             }.onFailure { error ->
                 fail("backup", error.message ?: context.getString(R.string.err_backup), error)
             }
@@ -1403,46 +1465,56 @@ class SessionController(
     // ---------------------------------------------------------------- navigation
 
     fun openServer(serverId: String) {
-        publish(state.copy(screen = AppScreen.Detail, activeServerId = serverId, error = null))
+        publish(state.copy(activeServerId = serverId, error = null).selectTab(Tab.Servers).at(Route.Detail(serverId)))
         scope.launch { resolveEndpoint(serverId) }
     }
 
-    fun goSetup() = publish(state.copy(screen = AppScreen.Setup, error = null, highlightItem = null))
+    /** Selecting a destination keeps that tab's history; it never clears another tab. */
+    fun goTab(tab: Tab) = publish(state.copy(error = null, highlightItem = null).selectTab(tab))
+
+    fun goSetup() = goTab(Tab.Home)
+
+    fun goSettings() = goTab(Tab.Settings)
+
+    fun goServers() = goTab(Tab.Servers)
+
+    fun goNetwork() = goTab(Tab.Network)
 
     /**
-     * Back from Settings used to hard-code goSetup(), so leaving Settings during a
-     * provision dropped the Progress screen and the run only reappeared when it
-     * finished. Remember where the user came from and prefer a live run.
+     * Back is a pop, not a hard-coded destination. Leaving Settings during a creation
+     * returns to Progress because Progress is still on the Home tab's stack.
      */
-    fun goSettings() {
-        settingsReturn = state.screen
-        publish(state.copy(screen = AppScreen.Settings))
+    fun goBack() {
+        val popped = state.nav.pop()
+        if (popped == null) return
+        publish(state.copy(nav = popped, guideId = null, error = null).focusedOn(state.activeServerId))
     }
 
-    fun leaveSettings() {
-        val target = when {
-            state.provisioning -> AppScreen.Progress
-            settingsReturn != null && settingsReturn != AppScreen.Settings &&
-                settingsReturn != AppScreen.Guide -> settingsReturn!!
-            else -> AppScreen.Setup
-        }
-        settingsReturn = null
-        publish(state.copy(screen = target, guideId = null))
-    }
+    fun leaveSettings() = goBack()
 
-    fun goServers() = publish(state.copy(screen = AppScreen.Servers, error = null, activeServerId = null))
+    fun openGuide(id: String) = publish(state.copy(guideId = id).at(Route.Guide(id)))
 
-    fun goNetwork() = publish(state.copy(screen = AppScreen.Network, error = null))
+    fun closeGuide() = goBack()
 
-    fun openGuide(id: String) = publish(state.copy(screen = AppScreen.Guide, guideId = id))
-
-    fun closeGuide() = publish(state.copy(screen = AppScreen.Settings, guideId = null))
+    /** The persistent affordance that returns to a creation running in the background. */
+    fun openProgress() = publish(state.selectTab(Tab.Home).at(Route.Progress))
 
     fun togglePassword() = publish(state.copy(passwordVisible = !state.passwordVisible))
 
     fun clearError() = publish(state.copy(error = null))
 
-    fun clearToast() = publish(state.copy(toast = null))
+    fun clearMessage() = publish(state.copy(message = null))
+
+    /** Feedback for a copy action, shown in the snackbar rather than an Android Toast. */
+    fun copiedNotice() = notifyUser(stringsFor(state.localeTag).copiedToClipboard)
+
+    /** A transient message for the snackbar host. Repeats get a new sequence. */
+    private fun notifyUser(text: String, isError: Boolean = false, actionLabel: String? = null) {
+        messageSeq += 1
+        publish(state.copy(message = UiMessage(messageSeq, text, isError, actionLabel)))
+    }
+
+    private var messageSeq = 0L
 
     fun clearCredentials() {
         rdpSessions.values.forEach { it.close() }
